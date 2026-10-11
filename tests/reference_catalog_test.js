@@ -63,3 +63,14 @@ test('expanded attachment metadata preserves distinct item variants on transcrip
  assert.equal(clean.text,'Compare these');
  assert.deepEqual(clean.references.map(r=>r.payload),['item:2140:0:0:0:0:0:15','item:2140:0:0:0:0:0:16']);
 });
+
+
+test('Guide prompts avoid legacy coding-agent instructions and duplicate closing summaries',()=>{
+ const {guidePrompt}=require('../bridge/prompt-context');
+ const prompt=guidePrompt('Character: TestHunter','Use fresh character data.','How much damage did I do?');
+ assert.ok(prompt.includes('player’s journal')&&prompt.includes('Character: TestHunter'));
+ assert.ok(!prompt.includes('TL;DR')&&!prompt.includes('WOW_AI_MAP_FILE')&&!prompt.includes('writing addons'));
+ assert.equal(prompt.match(/Use fresh character data/g).length,1);
+ assert.ok(!prompt.includes('wowmacro'));
+ assert.ok(guidePrompt('','', 'Write a macro').includes('255 characters'));
+});

@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {spawn}=require('node:child_process');
+const {spawn,spawnSync}=require('node:child_process');
 const Core=require('../bridge/setup-core'),Sources=require('../bridge/forever-sources'),{defaultSocket}=require('../bridge/copilot-ipc');
 
 test('portable setup finds an addon installation, isolates user data, and preserves model choices',()=>{
@@ -45,6 +45,19 @@ test('Windows startup quotes spaces and special characters inside an encoded Pow
  assert.match(script,/Start-Process -FilePath 'C:\\Program Files\\node.exe'/);
  assert.ok(script.includes('"'+path.join('User folder','Guide','bridge','bridge.js')+'"'));
  assert.ok(script.includes('-WindowStyle Hidden'));
+});
+
+test('Linux startup uses an absolute working directory and a valid unit with spaces',()=>{
+ if(process.platform==='win32')return;
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'guide service '));
+ try {
+  const unit=Core.startupFiles({runtime:dir,node:process.execPath,platform:'linux',home:dir,env:{PATH:process.env.PATH}});
+  assert.ok(unit.body.includes('WorkingDirectory='+dir+'\n'));
+  const file=path.join(dir,'adventurers-guide.service');fs.writeFileSync(file,unit.body);
+  const check=spawnSync('systemd-analyze',['--user','verify',file],{encoding:'utf8'});
+  if(check.error?.code==='ENOENT')return;
+  assert.equal(check.status,0,check.stderr);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('cross-platform sources reject private hosts and preserve dated official notes through partial failures',async()=>{

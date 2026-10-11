@@ -76,7 +76,7 @@ function startupFiles({runtime,node=process.execPath,platform=process.platform,h
   return {path:path.join(dir,'AdventurersGuide.cmd'),body:'@echo off\r\npowershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand '+Buffer.from(script,'utf16le').toString('base64')+'\r\n'};
  }
  const quoted=value=>JSON.stringify(value).replace(/%/g,'%%');
- return {path:path.join(home,'.config','systemd','user','adventurers-guide.service'),body:`[Unit]\nDescription=Adventurer's Guide\nAfter=graphical-session.target\n\n[Service]\nType=simple\nWorkingDirectory=${quoted(runtime)}\nExecStart=${quoted(node)} ${quoted(path.join(runtime,'bridge','bridge.js'))}\nEnvironment=${quoted('PATH='+env.PATH)}\nRestart=on-failure\nRestartSec=5\nRestartPreventExitStatus=2\nUMask=0077\n\n[Install]\nWantedBy=graphical-session.target\n`};
+ return {path:path.join(home,'.config','systemd','user','adventurers-guide.service'),body:`[Unit]\nDescription=Adventurer's Guide\nAfter=graphical-session.target\n\n[Service]\nType=simple\nWorkingDirectory=${runtime.replace(/%/g,'%%').replace(/\\/g,'\\x5c').replace(/\n/g,'\\x0a')}\nExecStart=${quoted(node)} ${quoted(path.join(runtime,'bridge','bridge.js'))}\nEnvironment=${quoted('PATH='+env.PATH)}\nRestart=on-failure\nRestartSec=5\nRestartPreventExitStatus=2\nUMask=0077\n\n[Install]\nWantedBy=graphical-session.target\n`};
 }
 async function setStartup(enabled,options) {
  const file=startupFiles(options);fs.mkdirSync(path.dirname(file.path),{recursive:true});

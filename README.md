@@ -1,6 +1,6 @@
 # Adventurer’s Guide
 
-A companion for **WoW: Forever**.
+A character-aware companion for **WoW: Forever**.
 
 ![Item cards in the journal](images/journal.png)
 
@@ -10,7 +10,7 @@ A companion for **WoW: Forever**.
 - Auctionator prices and character memory.
 - Minimap launcher, smooth scrolling, resizing and model/effort controls.
 
-**Ctrl+Alt+middle-click** attaches items, spells and quests—including chat links and loot rolls.
+**Ctrl+Alt+middle-click** attaches items, spells and quests—also in chat and loot rolls.
 
 ## Install
 
@@ -20,6 +20,6 @@ A companion for **WoW: Forever**.
 
 ![First-run setup](images/setup.png)
 
-Windows beta; Linux Niri/X11. Companion autostart available. Codex limits apply. Prices need scans; restricted data stays unknown. No gameplay automation.
+Windows beta; Linux Niri/X11. Optional autostart. Codex limits apply. Prices need scans. No gameplay automation.
 
 MIT, based on [wow-ai](https://github.com/chelinho139/wow-ai). Other addons remain separate.

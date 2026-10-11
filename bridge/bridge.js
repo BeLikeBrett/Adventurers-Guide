@@ -628,8 +628,8 @@ function runJob(job) {
   if (cfg.copilot?.vision && !lightweight && Context.needsVision(job.text)) {
     try { images.push(Vision.screenshot(cfg)); } catch (e) { log('vision unavailable:', e.message); }
   }
-  const system = P.systemPrompt(ctx, primer());
-  const systemShort = P.systemPrompt(ctx, '');
+  const system = cfg.copilot ? Context.guidePrompt(ctx, primer(), job.text) : P.systemPrompt(ctx, primer());
+  const systemShort = cfg.copilot ? Context.guidePrompt(ctx, '', job.text) : P.systemPrompt(ctx, '');
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
   const input = agent.input({ prompt: job.text, system, systemShort, resume, cfg: acfg, images });
   if (input.promptFile !== undefined) {
