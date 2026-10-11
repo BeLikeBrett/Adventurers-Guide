@@ -13,6 +13,13 @@ local function call(fn,...)
     local ok,a,b,c,d,e=pcall(fn,...)
     if ok then return safe(a),safe(b),safe(c),safe(d),safe(e) end
 end
+local function combatReader()
+    if C_CombatLogInternal and type(C_CombatLogInternal.GetCurrentEventInfo)=="function" then
+        return C_CombatLogInternal.GetCurrentEventInfo,"COMBAT_LOG_EVENT_INTERNAL_UNFILTERED"
+    end
+    local legacy=CombatLogGetCurrentEventInfo or (C_CombatLog and C_CombatLog.GetCurrentEventInfo)
+    if type(legacy)=="function" then return legacy,"COMBAT_LOG_EVENT_UNFILTERED" end
+end
 local function refreshOwners()
     local guid=call(UnitGUID,"player")
     if guid and guid~=playerGUID then
@@ -118,9 +125,9 @@ end
 function WoWAI.CombatSnapshot(seconds,from,to,includePets)
     if not enabled then return {available=false,reason="Guide is closed."} end
     refreshOwners();local now=GetTime();prune(now)
-    local accessor=CombatLogGetCurrentEventInfo or (C_CombatLog and C_CombatLog.GetCurrentEventInfo)
+    local accessor,eventName=combatReader()
     seconds=math.max(1,math.min(300,tonumber(seconds) or 30));to=to or now;from=from or to-seconds
-    local result={available=type(accessor)=="function" and not restricted,restricted=restricted,source="Readable COMBAT_LOG_EVENT_UNFILTERED events",windowSeconds=to-from,
+    local result={available=type(accessor)=="function" and not restricted,restricted=restricted,source="Readable "..tostring(eventName or "combat").." events",windowSeconds=to-from,
         coverageSeconds=math.max(0,to-math.max(from,started or to,droppedUntil or from)),
         includePets=includePets~=false,outgoing=totals(),incoming=totals(),abilities={},sources={},incomingAbilities={},critEvents={},castSequence={},threat={player=threat("player","target"),pet=threat("pet","target")},swings={},
         limitations="Observed events only. Threat is target-specific; changes include threat modifiers/resets. Swing predictions are estimates and may reset. Ability order does not prove causation."}
@@ -189,12 +196,21 @@ function WoWAI.CollectCombatRequest(request)
     return WoWAI.CombatSnapshot(options.seconds,nil,nil,options.includePets)
 end
 local frame=CreateFrame("Frame")
-pcall(frame.RegisterEvent,frame,"COMBAT_LOG_EVENT_UNFILTERED")
+local registeredEvent
+local function registerCombatReader()
+    local getter,event=combatReader()
+    if event and event~=registeredEvent then
+        if registeredEvent then frame:UnregisterEvent(registeredEvent) end
+        local ok=pcall(frame.RegisterEvent,frame,event)
+        if ok then registeredEvent=event end
+    end
+end
+registerCombatReader()
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent",function(_,event)
-    if event=="PLAYER_LOGIN" then WoWAI.SetCombatEnabled(not WoWAIDB or WoWAIDB.settings.copilotEnabled~=false);return end
-    if not enabled then return end
-    local getter=CombatLogGetCurrentEventInfo or (C_CombatLog and C_CombatLog.GetCurrentEventInfo)
+    if event=="PLAYER_LOGIN" then registerCombatReader();WoWAI.SetCombatEnabled(not WoWAIDB or WoWAIDB.settings.copilotEnabled~=false);return end
+    if not enabled or event~=registeredEvent then return end
+    local getter=combatReader()
     if type(getter)=="function" then local ok=pcall(function() WoWAI.RecordCombatEvent(getter()) end);if not ok then restricted=true end end
 end)
 if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(1,sampleThreat) end

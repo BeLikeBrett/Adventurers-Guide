@@ -1295,7 +1295,10 @@ test('chat status refreshes preserve scroll position; wheel steps are fine and d
 test('composer has a fixed compact height and a horizontal width anchor',()=>{
  const vm=newVM();login(vm);
  assert.equal(vm.num('WoWAIInputBackground:GetHeight()'),42);
- assert.equal(vm.evaluate('WoWAIInputBackground.points[2][1]'),'RIGHT');
+ assert.equal(vm.evaluate('WoWAIInputBackground.points[2][1]'),'BOTTOMRIGHT');
+ assert.equal(vm.evaluate('WoWAIInputBackground.points[1][2] == WoWAIFrame'),'true');
+ assert.equal(vm.num('WoWAIInputBackground.points[2][5]'),44);
+ assert.ok(vm.num('WoWAIScroll.y') >= 44+42+10);
  assert.equal(vm.num('WoWAIInputBackground.points[1][5]'),44);
 });
 
@@ -1384,6 +1387,7 @@ test('minimap icon stays available after X, reopens and resumes the guide, and s
  login(vm);connect(vm);
  vm.run('WoWAI.Toggle(true);WoWAI.CloseGuide()');
  assert.equal(vm.evaluate('WoWAIMinimapButton:IsShown()'),'true');
+ assert.equal(vm.evaluate('WoWAIMinimapButton:GetParent()==UIParent'),'true');
  assert.equal(vm.evaluate('WoWAIFrame:IsShown()'),'false');
  assert.equal(vm.evaluate('WoWAIMini:IsShown()'),'false');
  assert.equal(vm.evaluate('WoWAIDB.settings.copilotEnabled'),'false');
@@ -1504,4 +1508,37 @@ test('auction searches use Auctionator only at an auctioneer and observations ca
  assert.equal(vm.num('searches'),1);assert.equal(vm.evaluate('price.search.started'),'false');
  vm.run('WoWAI.AuctionSnapshot({itemIds={11853}});WoWAIDB.auctionCache.items["11853"]={observedAt=time(),listings={{unitPrice=1}}};realm="Other";price=WoWAI.AuctionSnapshot({itemIds={11853}})');
  assert.equal(vm.evaluate('price.prices[1].lowestObservedUnitPrice'),null);
+});
+
+
+test('Forever combat uses its unrestricted internal event without registering the restricted legacy event',()=>{
+ const vm=newVM();login(vm);
+ vm.run(`
+  UnitGUID=function(u) return u=="player" and "Player-mine" end
+  C_CombatLogInternal={GetCurrentEventInfo=function() return 0,"SWING_DAMAGE",false,"Player-mine","You",257,0,"Enemy","Enemy",0,0,100,0,1,0,0,0,true,false,false,false end}
+ `);
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');
+ vm.run(`
+  WoWAI.SetCombatEnabled(true)
+  STUB.FireEvent("COMBAT_LOG_EVENT_INTERNAL_UNFILTERED")
+  summary=WoWAI.CombatSnapshot(30)
+  legacyRegistrations=0
+  for _,f in ipairs(STUB.frames) do if f.events.COMBAT_LOG_EVENT_UNFILTERED then legacyRegistrations=legacyRegistrations+1 end end
+ `);
+ assert.equal(vm.num('summary.outgoing.damage'),100);assert.equal(vm.num('summary.outgoing.crits'),1);
+ assert.equal(vm.evaluate('summary.available'),'true');assert.equal(vm.num('legacyRegistrations'),0);
+});
+
+test('Blizzard chat send methods stay untouched and blocked-action diagnostics are retained',()=>{
+ const vm=newVM(`
+  ChatFrame1EditBox=CreateFrame("EditBox","ChatFrame1EditBox",UIParent)
+  local function original() end
+  ChatFrame1EditBox.ProcessChatType=original;ChatFrame1EditBox.SendMessage=original;ChatFrame1EditBox.SendText=original
+  ORIGINAL_CHAT_SEND=original
+ `);
+ login(vm);
+ assert.equal(vm.evaluate('ChatFrame1EditBox.SendMessage==ORIGINAL_CHAT_SEND'),'true');
+ assert.equal(vm.evaluate('ChatFrame1EditBox.ProcessChatType==ORIGINAL_CHAT_SEND'),'true');
+ vm.run('STUB.FireEvent("ADDON_ACTION_BLOCKED","WoWAI","Frame:RegisterEvent()")');
+ assert.equal(vm.evaluate('WoWAIDB.lastBlockedAction.action'),'Frame:RegisterEvent()');
 });

@@ -77,6 +77,7 @@ function WoWAI.CollectSnapshot(section,requestToken)
         return { name = "World of Warcraft: Forever", version = version, build = build, interface = interface }
     end) or { name = "World of Warcraft: Forever" }
     snapshot.player.realm = call(GetRealmName)
+    snapshot.player.addonIssue = WoWAIDB and WoWAIDB.lastBlockedAction or nil
     snapshot.player.money = call(GetMoney)
     snapshot.player.faction = call(UnitFactionGroup, "player")
     snapshot.player.xp = call(UnitXP, "player")

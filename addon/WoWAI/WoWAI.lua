@@ -2309,88 +2309,6 @@ end
 -- type, Tab, Esc or a cleared box drops the target again.
 local AGENT_R, AGENT_G, AGENT_B = 0.49, 0.78, 1.0
 
-local function PaintAgentHeader(eb, chat)
-	local header = _G[eb:GetName() .. "Header"]
-	local suffix = _G[eb:GetName() .. "HeaderSuffix"]
-	if not header then return end
-	eb.agentPainting = true
-	eb:UpdateHeader() -- lay out normally first, then repaint
-	eb.agentPainting = nil
-	header:SetWidth(0)
-	header:SetText("To " .. "Guide" .. " [" .. Display(chat.name) .. "]: ")
-	header:SetTextColor(AGENT_R, AGENT_G, AGENT_B)
-	if suffix then suffix:Hide() end
-	eb:SetTextInsets(15 + header:GetWidth(), 13, 0, 0)
-	eb:SetTextColor(AGENT_R, AGENT_G, AGENT_B)
-end
-
-local function SendBoxToAgent(eb)
-	local chat = FindChat(eb.agentTarget)
-	local text = Trim(eb:GetText() or "")
-	eb.agentTarget = nil
-	eb:ClearChat()
-	if chat and db.activeChat ~= chat.id then WoWAI.SwitchChat(chat.id) end
-	if text ~= "" then
-		WoWAI.Send(text)
-	else
-		WoWAI.Toggle(true)
-		if ui.input then ui.input:SetFocus() end
-	end
-end
-
-local function HookReplyCommand()
-	for i = 1, (NUM_CHAT_WINDOWS or 10) do
-		local eb = _G["ChatFrame" .. i .. "EditBox"]
-		if eb and eb.ProcessChatType and not eb.agentReplyHooked then
-			eb.agentReplyHooked = true
-
-			local origProcess = eb.ProcessChatType
-			eb.ProcessChatType = function(self, msg, index, send, ...)
-				if index ~= "REPLY" then
-					self.agentTarget = nil
-					return origProcess(self, msg, index, send, ...)
-				end
-				if not (db and run.lastMessenger == "agent") then
-					return origProcess(self, msg, index, send, ...)
-				end
-				local chat = FindChat(run.lastReplyChat) or ActiveChat()
-				if send == 1 then
-					self:SetText(msg or "")
-					self.agentTarget = chat and chat.id
-					SendBoxToAgent(self)
-					return true
-				end
-				self.agentTarget = chat and chat.id
-				self:SetText(msg or "")
-				if chat then PaintAgentHeader(self, chat) end
-				return true
-			end
-
-			-- Enter arrives here; nothing below us ever sees an agent-targeted box.
-			for _, name in ipairs({ "SendMessage", "SendText" }) do
-				local orig = eb[name]
-				if orig then
-					eb[name] = function(self, ...)
-						if self.agentTarget then
-							SendBoxToAgent(self)
-							return
-						end
-						return orig(self, ...)
-					end
-				end
-			end
-
-			-- Anything that repaints the header normally (Tab, /s, sticky reset) ends agent mode.
-			hooksecurefunc(eb, "UpdateHeader", function(self)
-				if not self.agentPainting then self.agentTarget = nil end
-			end)
-			hooksecurefunc(eb, "ClearChat", function(self)
-				self.agentTarget = nil
-			end)
-		end
-	end
-end
-
 -- Clicks on our [reply] / [open] links in the chat frame.
 hooksecurefunc("SetItemRef", function(link)
 	local action, chatId = tostring(link):match("^wowai:(%a+):(%w+)")
@@ -2937,7 +2855,7 @@ end
 
 function WoWAI.PositionMinimapButton()
     if not ui.minimapButton or not Minimap or not db then return end
-    local radians = (tonumber(db.settings.minimapAngle) or 225) * math.pi / 180
+    local radians = (tonumber(db.settings.minimapAngle) or 160) * math.pi / 180
     local rx = (Try(Minimap.GetWidth,Minimap) or 140)/2 + 8
     local ry = (Try(Minimap.GetHeight,Minimap) or 140)/2 + 8
     ui.minimapButton:ClearAllPoints()
@@ -2945,10 +2863,11 @@ function WoWAI.PositionMinimapButton()
 end
 local function BuildMinimapButton()
     if not Minimap or ui.minimapButton then return end
-    local button = CreateFrame("Button","WoWAIMinimapButton",Minimap)
+    local button = CreateFrame("Button","WoWAIMinimapButton",UIParent)
     ui.minimapButton = button
     button:SetSize(32,32)
-    button:SetFrameLevel((Try(Minimap.GetFrameLevel,Minimap) or 0)+5)
+    button:SetFrameStrata("MEDIUM")
+    button:SetFrameLevel((Try(Minimap.GetFrameLevel,Minimap) or 0)+20)
     button:SetClampedToScreen(true)
     button:RegisterForClicks("LeftButtonUp")
     button:RegisterForDrag("LeftButton")
@@ -2992,6 +2911,7 @@ local function BuildMinimapButton()
     end)
     button:SetScript("OnLeave",function() GameTooltip:Hide() end)
     WoWAI.PositionMinimapButton()
+    button:Show()
 end
 local function BuildUI()
 	if ui.frame then return end
@@ -3302,6 +3222,7 @@ local function BuildUI()
 	scroll:SetPoint("TOPLEFT", panel, "TOPRIGHT", 8, 0)
 	scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 96)
     ui.scroll = scroll
+    if scroll.SetClipsChildren then scroll:SetClipsChildren(true) end
     scroll.followLatest = true
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel",function(self,delta)
@@ -3342,8 +3263,8 @@ local function BuildUI()
 	-- Input box, with Send docked at its right end like a messaging app.
 	local SEND_W = 84
 	local inputBg = CreateFrame("Frame", "WoWAIInputBackground", f, "BackdropTemplate")
-	inputBg:SetPoint("BOTTOMLEFT", panel, "BOTTOMRIGHT", 8, 44)
-    inputBg:SetPoint("RIGHT", f, "RIGHT", -14 - SEND_W - 6, 0)
+	inputBg:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14 + PANEL_W + 8, 44)
+    inputBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14 - SEND_W - 6, 44)
     inputBg:SetHeight(42)
 	inputBg:SetBackdrop({
 		bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -3394,7 +3315,7 @@ local function BuildUI()
         end)
         if draftDeck.referenceDeck then draftDeck.referenceDeck:ClearAllPoints();draftDeck.referenceDeck:SetPoint("TOPLEFT",draftDeck,"TOPLEFT",0,0) end
         draftDeck:SetShown(#refs>0)
-        scroll:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-32,#refs>0 and 196 or 96)
+        scroll:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-32,44+inputBg:GetHeight()+10+(#refs>0 and 108 or 0))
     end
     input:HookScript("OnTextChanged",function() WoWAI.UpdateDraftCards() end)
 
@@ -3955,10 +3876,13 @@ ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("UPDATE_MACROS")
 ev:RegisterEvent("CHAT_MSG_WHISPER")
 ev:RegisterEvent("CHAT_MSG_BN_WHISPER")
-ev:SetScript("OnEvent", function(self, event, arg1)
-	if event == "ADDON_LOADED" then
+ev:RegisterEvent("ADDON_ACTION_BLOCKED")
+ev:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+ev:SetScript("OnEvent", function(self, event, arg1, arg2)
+	if event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+        if db and arg1 == ADDON_NAME then db.lastBlockedAction={action=tostring(arg2 or "unknown"),at=time(),event=event} end
+    elseif event == "ADDON_LOADED" then
 		WoWAI.HookChatLinks()
-		if g_addonCategoriesCollapsed and g_addonCategoriesCollapsed["Guide support"] == nil then g_addonCategoriesCollapsed["Guide support"] = true end
         if arg1 == ADDON_NAME then
 			InitDB()
 		end
@@ -3968,9 +3892,7 @@ ev:SetScript("OnEvent", function(self, event, arg1)
 	elseif event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" then
 		if ui.frame then SaveChatGeometry() end
         WoWAI.PositionMinimapButton()
-	elseif event == "ADDON_LOADED" and arg1 == "Blizzard_AddOnList" then
-        if g_addonCategoriesCollapsed then g_addonCategoriesCollapsed["Guide support"]=true end
-    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP" or event == "PLAYER_TALENT_UPDATE" then
+	elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "PLAYER_LEVEL_UP" or event == "PLAYER_TALENT_UPDATE" then
         run.contextSent = nil
         C_Timer.After(1,function() WoWAI.QueueSnapshot(true) end)
 	elseif event == "UPDATE_BINDINGS" then
@@ -3979,6 +3901,7 @@ ev:SetScript("OnEvent", function(self, event, arg1)
 		WoWAI.HandleAttachmentMouse(arg1, event == "GLOBAL_MOUSE_DOWN")
 	elseif event == "PLAYER_LOGIN" then
 		if not db then InitDB() end
+		BuildMinimapButton()
 		BuildUI()
 		run = { outbound = {} }
 		WoWAI.HookChatLinks()
@@ -4014,7 +3937,6 @@ ev:SetScript("OnEvent", function(self, event, arg1)
 		WoWAI.ArmAutoRefresh()
 		WoWAI.UpdateDot()
 		if db.settings.longchat then ApplyLongChat() end
-		HookReplyCommand()
 		C_Timer.NewTicker(TICK_SECONDS, Tick)
 		C_Timer.After(3, WoWAI.SayHello)
 	elseif event == "UPDATE_MACROS" then
