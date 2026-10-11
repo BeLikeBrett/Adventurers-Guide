@@ -33,4 +33,3 @@ function displayMessage(text) {
   return {text,references:refs};
 }
 module.exports={validateCards,luaValue,displayMessage};
-

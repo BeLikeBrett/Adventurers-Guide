@@ -98,13 +98,13 @@ test('splitSummary takes the last TL;DR block for the game chat and keeps the wh
   assert.equal((lua.match(/summary = /g) || []).length, 1);
 });
 
-test('the shipped primer exists, mentions the essentials, and stays small enough to send on every run', () => {
+test('the gameplay primer grounds recommendations and avoids unnecessary refreshes', () => {
   const fs = require('fs');
-  const primer = fs.readFileSync(path.join(__dirname, '..', 'docs', 'WOW-ADDON-PRIMER.md'), 'utf8');
-  for (const must of ['## Interface: 16001', 'Gethe/wow-ui-source', 'InCombatLockdown', 'hooksecurefunc', 'SavedVariables', '/reload', '#showtooltip']) {
+  const primer = fs.readFileSync(path.join(__dirname, '..', 'copilot', 'PRIMER.md'), 'utf8');
+  for (const must of ['World of Warcraft: Forever', 'under 15 seconds', 'get_combat_summary', 'get_gear_recommendations', 'search_forever_sources', 'show_reference_cards', 'No gameplay automation']) {
     assert.ok(primer.includes(must), 'primer mentions ' + must);
   }
-  assert.ok(primer.length < 9000, `primer is ${primer.length} chars; keep it under 9000 (it costs tokens on every message)`);
+  assert.ok(primer.length < 9000, `primer is ${primer.length} characters`);
 });
 
 test('jobsFromStrip handles several records per frame and older formats', () => {
