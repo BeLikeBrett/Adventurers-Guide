@@ -1,0 +1,41 @@
+{
+  "name": "adventurers-guide",
+  "version": "0.7.0",
+  "private": true,
+  "description": "A character-aware quest, gear and dungeon companion for World of Warcraft: Forever.",
+  "license": "MIT",
+  "author": "BeLikeBrett",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BeLikeBrett/Adventurers-Guide.git"
+  },
+  "keywords": [
+    "world-of-warcraft",
+    "forever",
+    "quests",
+    "gear",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=22.2"
+  },
+  "scripts": {
+    "start": "node bridge/bridge.js",
+    "slots": "node bridge/install-slots.js",
+    "test": "node tests/run-test.mjs",
+    "mcp": "node bridge/copilot-mcp.mjs",
+    "release": "python3 build-release.py"
+  },
+  "devDependencies": {
+    "luaparse": "^0.3.1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@openai/codex": "0.162.1",
+    "fengari": "^0.1.4",
+    "zod": "^4.6.5"
+  },
+  "contributors": [
+    "chelinho139 (original wow-ai)"
+  ]
+}

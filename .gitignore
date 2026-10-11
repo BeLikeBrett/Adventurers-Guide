@@ -1,0 +1,16 @@
+node_modules/
+dist/
+backups/
+bridge/config.json
+bridge/state.json
+bridge/transcripts.json
+bridge/character-notes.json
+bridge/bridge.log
+bridge/copilot.sock
+bridge/tmp/
+bridge/mapjobs/
+*.log
+*.backup
+*.tmp
+__pycache__/
+tests/tmp/
