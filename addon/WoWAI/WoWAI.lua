@@ -463,6 +463,10 @@ local function SoundValid(path)
 	return willPlay and true or false
 end
 
+function WoWAI.SoundChannelAvailable()
+    return signalAvailable and db and db.settings.signal and true or false
+end
+
 local function CheckSignal(kind, id)
 	if run.signalUnreliable then return false end
 	return SoundValid(string.format("Interface\\AddOns\\WoWAI\\%s\\%03d.wav", kind, SlotNumber(id)))
@@ -698,6 +702,14 @@ local function ActivityLine(chat)
 	return s
 end
 
+function WoWAI.TransportStatus()
+    local free=0
+    for i=1,SLOT_COUNT do if not C_AddOns.IsAddOnLoaded(SlotName(i)) then free=free+1 end end
+    return {freeReplySlots=free,replySlots=SLOT_COUNT,reads=run.polls or 0,slotError=run.slotError,
+        soundAvailable=signalAvailable and db.settings.signal or false,soundTest=signalStats.selftest,
+        exhausted=run.slotsExhausted or false,preloaded=run.slotsPreloaded or false}
+end
+
 local function FreeSlot()
 	for i = 1, SLOT_COUNT do
 		local name = SlotName(i)
@@ -801,14 +813,19 @@ local function TryLoadSlot(why)
 	local name = FreeSlot()
 	if not name then
 		run.slotsExhausted = true
+        if not run.polls or run.polls==0 then run.slotsPreloaded=true end
 		WoWAI.ArmAutoRefresh()
 		WoWAI.UpdateStatus()
 		return
 	end
 	WoWAI_SlotData = nil
 	local loaded, reason = C_AddOns.LoadAddOn(name)
-	if not loaded then
-		run.slotError = reason
+	if not loaded and type(WoWAI_SlotData) ~= "table" then
+        run.slotError = reason or "Cache loaded without reply data"
+        if C_AddOns.IsAddOnLoaded(name) then
+            run.polls=(run.polls or 0)+1
+            ScheduleNextPoll()
+        end
 		if reason == "MISSING" or reason == "DISABLED" then
 			run.slotsMissing = true
 			WoWAI.ArmAutoRefresh()
@@ -816,7 +833,8 @@ local function TryLoadSlot(why)
 		WoWAI.UpdateStatus()
 		return
 	end
-	run.polls = (run.polls or 0) + 1
+	run.slotError = nil
+    run.polls = (run.polls or 0) + 1
 	ScheduleNextPoll()
 	local data = WoWAI_SlotData
 	if type(data) == "table" and type(data.now) == "number" then
@@ -1922,8 +1940,12 @@ function WoWAI.UpdateStatus()
     elseif c and c.pendingId then
         if run.slotsMissing then
             message = "Restart WoW to finish setting up the guide."
+        elseif run.slotsPreloaded then
+            message = "Reply caches loaded at startup. Fully reopen WoW after updating."
         elseif run.slotsExhausted then
             message = "Use /reload to refresh the guide."
+        elseif run.slotError then
+            message = "Reply delivery failed. Use /reload to receive your answer."
         elseif run.pixelFailed then
             message = "Message not received. Use /reload, then try again."
         elseif run.outbound[c.pendingId] and not run.outbound[c.pendingId].acked then
@@ -2088,7 +2110,13 @@ function WoWAI.Render()
 			Place(m.role, m.text, m.t and date("%H:%M", m.t) or "", false, denied, m.agent, m.macros, m.references or (m.role == "assistant" and c.referenceCards and c.referenceCards[tostring(m.id)]))
 		end
 		if c.pendingId then
-            Place("assistant", "Consulting your journal and the latest guides...", "", true)
+            local pendingText="Consulting your journal and the latest guides..."
+            if run.slotsPreloaded then pendingText="Reply delivery is unavailable. Fully reopen WoW after updating the guide."
+            elseif run.slotsExhausted then pendingText="Reply cache is full. Use /reload to receive your answer."
+            elseif run.slotsMissing then pendingText="Reply delivery needs setup. Fully reopen WoW after updating the guide."
+            elseif run.slotError then pendingText="Reply delivery failed. Use /reload to receive your answer."
+            elseif GetTime()-(run.sentAt or GetTime())>45 then pendingText="Still waiting for your answer. Checking reply delivery..." end
+            Place("assistant", pendingText, "", true)
 		elseif #c.history == 0 then
 			if run.restoring then
 				Place("system", "Opening your journal...", "", true)

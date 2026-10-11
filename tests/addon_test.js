@@ -13,7 +13,7 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = fengari;
 
 const ADDON = path.join(__dirname, '..', 'addon', 'WoWAI');
 const CELLS_PER_ROW = 512;
-const {FrameAssembler}=require('../bridge/copilot-state');
+const {FrameAssembler,SnapshotAssembler}=require('../bridge/copilot-state');
 
 const legacyFlags = flags => flags.split(';').filter(t => !t.startsWith('model=') && !t.startsWith('effort=')).join(';');
 
@@ -100,6 +100,18 @@ function stripRecords(vm) {
     if (withCtx) rec.ctx = p[6];
     return rec;
   });
+}
+
+function readSnapshot(vm) {
+  const assembler=new SnapshotAssembler();
+  for(let step=0;step<30;step++) {
+    for(const record of stripRecords(vm)) if(record.text.startsWith('__COPILOT1__')) {
+      const result=assembler.accept({...record,hello:true});
+      if(result?.snapshot) return result.snapshot;
+    }
+    vm.run('STUB.now=STUB.now+.3;STUB.RunTimers();STUB.Tick()');
+  }
+  throw new Error('Snapshot did not finish');
 }
 
 // Make the next LoadAddOn deliver this slot data (a Lua table literal body).
@@ -1276,7 +1288,7 @@ test('small live refreshes skip heavy collections and preempt a pending backgrou
   WoWAI.QueueSnapshot(false,"player","priority-token")
  `);
  assert.equal(vm.num('WoWAIDB.snapshotSeq'),vm.num('before')+1);
- assert.ok(decodeStrip(vm).text.includes('priority-token'));
+ assert.equal(readSnapshot(vm).requestToken,'priority-token');
 });
 
 test('chat status refreshes preserve scroll position; wheel steps are fine and delayed renders cannot undo a user scroll',()=>{
@@ -1552,8 +1564,7 @@ test('questions prioritize a small player update while explicit tool refreshes r
  vm.run('WoWAI.QueueSnapshot(false);before=WoWAIDB.snapshotSeq;WoWAI.Send("Where do I go?")');
  assert.equal(vm.num('WoWAIDB.snapshotSeq'),vm.num('before')+1);
  const records=stripRecords(vm);
- const snapshot=records.find(r=>r.text.startsWith('__COPILOT1__'));
- assert.ok(snapshot.text.includes('"section":"player"'));
+ assert.equal(readSnapshot(vm).section,'player');
  const question=records.find(r=>r.text==='Where do I go?');
  assert.ok(question.flags.includes('snapshot='+vm.num('WoWAIDB.snapshotSeq')));
  const other=newVM();login(other);connect(other);
@@ -1561,4 +1572,29 @@ test('questions prioritize a small player update while explicit tool refreshes r
  other.run('WoWAI.QueueSnapshot(false,"equipment","explicit-request");before=WoWAIDB.snapshotSeq;WoWAI.Send("Compare this item")');
  assert.equal(other.num('WoWAIDB.snapshotSeq'),other.num('before'));
  assert.ok(!stripRecords(other).find(r=>r.text==='Compare this item').flags.includes('snapshot='));
+});
+
+
+test('unusable sound channels cannot burn context caches and scheduled reads still deliver replies',()=>{
+ const vm=newVM();
+ vm.run('function PlaySoundFile() return true,1 end');
+ vm.run(fs.readFileSync(path.join(ADDON,'Snapshot.lua'),'utf8'),'WoWAI');
+ login(vm);connect(vm);
+ assert.equal(vm.evaluate('WoWAI.SoundChannelAvailable()'),'false');
+ const before=vm.num('WoWAI.TransportStatus().reads');
+ vm.run('for n=1,100 do STUB.Tick() end');
+ assert.equal(vm.num('WoWAI.TransportStatus().reads'),before,'no false refresh signals consume slots');
+ vm.run('WoWAI.Send("hi")');
+ const chatId=vm.evaluate('WoWAIDB.chats[1].id'),id=vm.num('WoWAIDB.chats[1].pendingId');
+ nextSlot(vm,`{now=time(),replies={{chat="${chatId}",id=${id},status="done",text="hello"}}}`);
+ vm.run('STUB.now=STUB.now+6;STUB.Tick()');
+ assert.equal(vm.evaluate('WoWAIDB.chats[1].pendingId'),null);
+});
+
+test('loading a cache with data succeeds even when the client omits the loaded return',()=>{
+ const vm=newVM();login(vm);connect(vm);vm.run('WoWAI.Send("hi")');
+ const chatId=vm.evaluate('WoWAIDB.chats[1].id'),id=vm.num('WoWAIDB.chats[1].pendingId');
+ nextSlot(vm,`{now=time(),replies={{chat="${chatId}",id=${id},status="done",text="hello"}}}`);
+ vm.run('C_AddOns.LoadAddOn=function(name) STUB.loaded[name]=true;STUB.onLoadAddOn(name);return nil end;STUB.now=STUB.now+6;STUB.Tick()');
+ assert.equal(vm.evaluate('WoWAIDB.chats[1].pendingId'),null);
 });

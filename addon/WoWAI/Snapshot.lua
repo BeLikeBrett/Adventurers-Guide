@@ -78,6 +78,7 @@ function WoWAI.CollectSnapshot(section,requestToken)
     end) or { name = "World of Warcraft: Forever" }
     snapshot.player.realm = call(GetRealmName)
     snapshot.player.addonIssue = WoWAIDB and WoWAIDB.lastBlockedAction or nil
+    snapshot.player.transport = call(WoWAI.TransportStatus)
     snapshot.player.money = call(GetMoney)
     snapshot.player.faction = call(UnitFactionGroup, "player")
     snapshot.player.xp = call(UnitXP, "player")
@@ -259,6 +260,10 @@ local function refreshSound(index)
 end
 if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(.5,function()
     if not WoWAIDB or WoWAIDB.settings.copilotEnabled==false then return end
+    -- Use the same startup self-test as reply delivery. A client that reports
+    -- every sound as playable cannot signal changes; scheduled reads still
+    -- deliver tool requests alongside pending replies.
+    if not WoWAI.SoundChannelAvailable or not WoWAI.SoundChannelAvailable() then return end
     if refreshHead==nil then
         local lo,hi=0,2000
         while lo<hi do local mid=math.floor((lo+hi+1)/2);if refreshSound(mid) then lo=mid else hi=mid-1 end end

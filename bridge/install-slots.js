@@ -35,7 +35,6 @@ for (let i = 1; i <= N; i++) {
     '## Interface: ' + iface,
     '## Title: Journal cache ' + String(i).padStart(3, '0'),
     "## Notes: Internal reply cache. Managed by Adventurer's Guide; leave enabled.",
-    '## Group: WoWAI_S001',
     '## Category: Guide support',
     '## IconTexture: Interface\\Icons\\INV_Misc_Book_09',
     '## LoadOnDemand: 1',
