@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Adventurer's Guide
 ## Notes: Character-aware quest, gear and dungeon guidance. Requires the companion.
-## Author: chelinho139
+## Author: BeLikeBrett, chelinho139
 ## Version: 0.7.0
 ## SavedVariables: WoWAIDB, WoWAIMapDB
 ## OptionalDeps: WoWAI_Nodes, GearQuestForever, ForeverDungeonJournal, Auctionator

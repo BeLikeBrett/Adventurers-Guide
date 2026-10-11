@@ -25,6 +25,20 @@ test('portable setup finds an addon installation, isolates user data, and preser
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
+test('reopening setup reuses an existing companion and ignores stale registrations',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'guide-install-'));
+ try {
+  const source=path.join(dir,'package'),data=path.join(dir,'data'),runtime=path.join(dir,'installed');
+  fs.mkdirSync(data);fs.mkdirSync(path.join(runtime,'bridge'),{recursive:true});
+  fs.writeFileSync(path.join(runtime,'bridge','config.json'),'{}');
+  fs.writeFileSync(path.join(data,'installation.json'),JSON.stringify({runtime}));
+  assert.equal(Core.runtimeDirectory(source,data),runtime);
+  assert.equal(Core.runtimeDirectory(source,data,true),path.join(data,'companion'));
+  fs.rmSync(runtime,{recursive:true});
+  assert.equal(Core.runtimeDirectory(source,data),path.join(data,'companion'));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
 test('Windows startup quotes spaces and special characters inside an encoded PowerShell command',()=>{
  const file=Core.startupFiles({runtime:path.join('User folder','Guide'),node:'C:\\Program Files\\node.exe',platform:'win32',home:'C:\\User',env:{APPDATA:'C:\\User\\AppData'}});
  const encoded=file.body.match(/-EncodedCommand (\S+)/)[1],script=Buffer.from(encoded,'base64').toString('utf16le');

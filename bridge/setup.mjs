@@ -10,7 +10,7 @@ import Core from './setup-core.js';
 const here=path.dirname(fileURLToPath(import.meta.url)),source=path.resolve(here,'..');
 let sourceAddon=fs.existsSync(path.join(source,'../WoWAI.toc'))?path.resolve(source,'..'):path.join(source,'addon','WoWAI');
 const data=process.env.GUIDE_SETUP_DATA||Core.dataDirectory();
-const runtime=!process.env.GUIDE_SETUP_DATA&&fs.existsSync(path.join(source,'bridge','config.json'))?source:path.join(data,'companion');
+const runtime=Core.runtimeDirectory(source,data,!!process.env.GUIDE_SETUP_DATA);
 const configFile=path.join(runtime,'bridge','config.json');
 let previous={};try{previous=JSON.parse(fs.readFileSync(configFile,'utf8'));}catch{}
 if(!fs.existsSync(path.join(sourceAddon,'WoWAI.toc'))&&previous.inboxFile)sourceAddon=path.dirname(previous.inboxFile);
@@ -76,6 +76,8 @@ async function install(args){
    await new Promise(resolve=>setTimeout(resolve,250));
   }
   if(!running)throw new Error('The companion did not start. Check companion.log in '+runtime);
+  fs.mkdirSync(data,{recursive:true,mode:0o700});
+  fs.writeFileSync(path.join(data,'installation.json'),JSON.stringify({runtime})+'\n',{mode:0o600});
   state.ready=true;state.message='Ready. Fully quit and reopen WoW, then click the minimap icon or type /ai.'+startupWarning;
   state.wow=wow;
  }finally{state.busy=false;}

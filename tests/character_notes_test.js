@@ -19,7 +19,7 @@ test('notes survive restart, isolate characters and realms, replace keys and exp
   const restored = new CharacterNotes(file);
   assert.equal(restored.get(who,now+2).notes.at(-1).text,'Turn in the hides.');
   assert.equal(restored.get(who,now+25*3600000).notes.length,1);
-  assert.equal(fs.statSync(file).mode & 0o777,0o600);
+  if(process.platform!=='win32')assert.equal(fs.statSync(file).mode & 0o777,0o600);
   assert.equal(restored.forget(who,'playstyle').removed,true);
   assert.equal(restored.get(who,now+25*3600000).notes.length,0);
  } finally {fs.rmSync(dir,{recursive:true,force:true});}

@@ -8,6 +8,14 @@ const ADDON=['Codec.lua','Inbox.lua','WoWAI.lua','Map.lua','Integrations.lua','R
 function dataDirectory(platform=process.platform,env=process.env,home=os.homedir()) {
  return platform==='win32'?path.join(env.LOCALAPPDATA||path.join(home,'AppData','Local'),'AdventurersGuide'):path.join(env.XDG_DATA_HOME||path.join(home,'.local','share'),'adventurers-guide');
 }
+function runtimeDirectory(source,data,isolated=false) {
+ if(!isolated&&fs.existsSync(path.join(source,'bridge','config.json')))return source;
+ if(!isolated)try {
+  const registered=JSON.parse(fs.readFileSync(path.join(data,'installation.json'),'utf8')).runtime;
+  if(typeof registered==='string'&&path.isAbsolute(registered)&&fs.existsSync(path.join(registered,'bridge','config.json')))return registered;
+ }catch{}
+ return path.join(data,'companion');
+}
 function gameDirectory(value) {
  let root=path.resolve(String(value||''));
  if(fs.existsSync(path.join(root,'WoWAI.toc')))root=path.resolve(root,'../../..');
@@ -89,4 +97,4 @@ function openBrowser(url) {
  else {command='xdg-open';args=[url];}
  const child=spawn(command,args,{detached:true,windowsHide:true,stdio:'ignore'});child.on('error',()=>{});child.unref();
 }
-module.exports={TOOLS,CODE,ADDON,dataDirectory,gameDirectory,accounts,configuration,copyRuntime,copyAddon,run,dependencies,systemCodex,startupFiles,setStartup,launchBridge,openBrowser};
+module.exports={TOOLS,CODE,ADDON,dataDirectory,runtimeDirectory,gameDirectory,accounts,configuration,copyRuntime,copyAddon,run,dependencies,systemCodex,startupFiles,setStartup,launchBridge,openBrowser};
