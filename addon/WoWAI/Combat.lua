@@ -122,10 +122,87 @@ local function sorted(rows)
     while #list>40 do table.remove(list) end
     return list
 end
+-- The Forever meter supplies readable fight aggregates after combat even when
+-- addon combat-log events are unavailable. Never treat aggregates as raw hits.
+local function publicTable(fn,...)
+    if type(fn)~="function" then return nil end
+    local ok,value=pcall(fn,...)
+    if not ok then return nil end
+    local function copy(v,depth)
+        local clean,accessible=safe(v)
+        if not accessible then return nil end
+        if type(clean)~="table" then return clean end
+        if depth>6 then return nil end
+        local out={};local count=0
+        for k,child in pairs(clean) do
+            local key,readable=safe(k)
+            if readable then out[key]=copy(child,depth+1) end
+            count=count+1;if count>500 then break end
+        end
+        return out
+    end
+    local copied,result=pcall(copy,value,0)
+    if copied and type(result)=="table" then return result end
+end
+local function spellName(id)
+    if id==0 then return "Melee" end
+    local info=publicTable(C_Spell and C_Spell.GetSpellInfo,id)
+    return info and info.name or call(GetSpellInfo,id) or ("Spell "..tostring(id))
+end
+function WoWAI.NativeCombatSnapshot(seconds)
+    if not C_DamageMeter or type(C_DamageMeter.GetCombatSessionFromType)~="function" then return nil end
+    if call(UnitAffectingCombat,"player") then
+        return {available=false,source="Blizzard damage meter",reason="Fight details are restricted during combat. Ask after the fight ends.",requestedWindowSeconds=seconds}
+    end
+    local current=Enum and Enum.DamageMeterSessionType and Enum.DamageMeterSessionType.Current or 1
+    local damageType=Enum and Enum.DamageMeterType and Enum.DamageMeterType.DamageDone or 0
+    local session=publicTable(C_DamageMeter.GetCombatSessionFromType,current,damageType)
+    local function playerSource(data)
+        for _,row in ipairs(data and data.combatSources or {}) do
+            if row.isLocalPlayer or (playerGUID and row.sourceGUID==playerGUID) then return row end
+        end
+    end
+    refreshOwners()
+    local row=playerSource(session)
+    if not row or type(row.totalAmount)~="number" then
+        return {available=false,source="Blizzard damage meter",reason="No readable recorded player fight is available. Enable the built-in damage meter and finish a fight.",requestedWindowSeconds=seconds}
+    end
+    local detail=publicTable(C_DamageMeter.GetCombatSessionSourceFromType,current,damageType,row.sourceGUID or playerGUID,row.sourceCreatureID)
+    local duration=session.durationSeconds or call(C_DamageMeter.GetSessionDurationSeconds,current)
+    local result={available=true,source="Blizzard damage meter",windowMode="fightAggregate",requestedWindowSeconds=seconds,
+        windowSeconds=duration,coverageSeconds=duration,includePets=true,petAttribution="Units attributed to the player by Blizzard; separate pet totals may be unavailable.",
+        outgoing={damage=row.totalAmount,dps=row.amountPerSecond},incoming={},abilities={},incomingAbilities={},sources={{guid=row.sourceGUID,name=row.name,kind="playerWithControlledUnits",damage=row.totalAmount}},
+        capabilities={abilityTotals=true,individualHits=false,crits=false,exactTimeWindow=false,weaponIdentity=false},
+        limitations="Latest current fight totals, not an exact rolling time window. Individual hit timestamps, critical counts, weapon identity and cast order are not supplied by this API. Pet attribution follows the game meter."}
+    local function abilities(data,field)
+        for _,spell in ipairs(data and data.combatSpells or {}) do
+            if type(spell.totalAmount)=="number" and type(spell.spellID)=="number" then
+                field[#field+1]={spellID=spell.spellID,name=spellName(spell.spellID),damage=spell.totalAmount,
+                    overkill=spell.overkillAmount,creatureName=spell.creatureName,unit=spell.combatSpellDetails and spell.combatSpellDetails.unitName}
+            end
+        end
+        table.sort(field,function(a,b) return a.damage>b.damage end)
+        while #field>40 do table.remove(field) end
+    end
+    abilities(detail,result.abilities)
+    for _,ability in ipairs(result.abilities) do ability.damageShare=row.totalAmount>0 and ability.damage/row.totalAmount*100 or 0 end
+    local incomingType=Enum and Enum.DamageMeterType and Enum.DamageMeterType.DamageTaken or 7
+    local taken=playerSource(publicTable(C_DamageMeter.GetCombatSessionFromType,current,incomingType))
+    if taken then
+        result.incoming.damage=taken.totalAmount
+        abilities(publicTable(C_DamageMeter.GetCombatSessionSourceFromType,current,incomingType,taken.sourceGUID or playerGUID,taken.sourceCreatureID),result.incomingAbilities)
+    end
+    return result
+end
+
 function WoWAI.CombatSnapshot(seconds,from,to,includePets)
     if not enabled then return {available=false,reason="Guide is closed."} end
     refreshOwners();local now=GetTime();prune(now)
     local accessor,eventName=combatReader()
+    if type(accessor)~="function" or restricted then
+        local native=WoWAI.NativeCombatSnapshot(seconds)
+        if native then return native end
+    end
     seconds=math.max(1,math.min(300,tonumber(seconds) or 30));to=to or now;from=from or to-seconds
     local result={available=type(accessor)=="function" and not restricted,restricted=restricted,source="Readable "..tostring(eventName or "combat").." events",windowSeconds=to-from,
         coverageSeconds=math.max(0,to-math.max(from,started or to,droppedUntil or from)),
@@ -176,6 +253,13 @@ end
 function WoWAI.BeginCombatMeasurement(seconds,token,includePets)
     if not enabled then return end
     seconds=math.max(1,math.min(30,tonumber(seconds) or 10))
+    local native=not combatReader() and WoWAI.NativeCombatSnapshot(seconds)
+    if native then
+        measurement={token=token,result=native}
+        measurement.result.measurement={token=token,durationSeconds=seconds,complete=false,supported=false,
+            reason="The built-in meter supplies whole fights. Exact timed measurements require the client's combat-log file."}
+        return WoWAI.QueueSnapshot(false,"combat",token)
+    end
     local item={token=token,from=GetTime(),to=GetTime()+seconds,includePets=includePets}
     measurement=item
     C_Timer.After(seconds,function()

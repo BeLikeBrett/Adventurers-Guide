@@ -15,6 +15,7 @@ const Notes = require('./character-notes');
 const Catalog = require('./addon-catalog');
 const Cards = require('./reference-cards');
 const Context = require('./prompt-context');
+const {CombatLog}=require('./combat-log');
 const snapshots = new SnapshotAssembler();
 const wireFrames = new FrameAssembler();
 const desktopRequests = new Map();
@@ -93,6 +94,7 @@ const cap = Object.assign({ enabled: true, processName: 'WowB', cellPx: 1, cells
 // (WoWClaude) still works: the paths are derived from addonDir instead.
 const INBOX_FILE = cfg.inboxFile && !/WoWClaude/.test(cfg.inboxFile) ? cfg.inboxFile : path.join(cfg.addonDir || '', 'WoWAI', 'Inbox.lua');
 const SAVED_VARS = String(cfg.savedVariablesFile || '').replace(/WoWClaude\.lua$/, 'WoWAI.lua');
+const combatLog=new CombatLog(cfg.addonDir||'.');
 
 let state = readJson(STATE_FILE, { lastId: 0, sessions: {}, handled: {} });
 if (!state.handled) state.handled = {};
@@ -901,6 +903,7 @@ function banner() {
 }
 
 banner();
+if(!exitWhenIdle)setInterval(()=>{if(state.copilotEnabled!==false)combatLog.read();},1000).unref();
 if (inject !== null) {
   submit({ id: state.lastId + 1, session: '', chat: '', text: inject, cwd: '', newSession: false, via: 'inject', agent: injectAgent || '' });
 } else {
@@ -953,11 +956,12 @@ async function performSnapshotRefresh(section,options={}) {
 // still has a single writer; MCP never edits state/slot files itself.
 if (!exitWhenIdle && cfg.copilot) IPC.serve(async (method, args) => {
   const ageSeconds = state.snapshot ? Math.round((Date.now() - state.snapshot.receivedAt) / 1000) : null;
-  if (method === 'status') return { running: true, enabled: state.copilotEnabled !== false, addonInstalled: addonInstalled(), mode: state.dispatchMode || cfg.copilot.dispatchMode || 'codex', snapshotAgeSeconds: ageSeconds, snapshotStale: ageSeconds === null || ageSeconds > 90, automaticJobs: running.size, pendingRequests: desktopRequests.size, lastReplyTiming:state.lastReplyTiming || null };
+  if (method === 'status') return { running: true, enabled: state.copilotEnabled !== false, addonInstalled: addonInstalled(), mode: state.dispatchMode || cfg.copilot.dispatchMode || 'codex', snapshotAgeSeconds: ageSeconds, snapshotStale: ageSeconds === null || ageSeconds > 90, automaticJobs: running.size, pendingRequests: desktopRequests.size, lastReplyTiming:state.lastReplyTiming || null,combatLog:combatLog.status() };
   if (state.copilotEnabled === false && !['requests', 'mode'].includes(method)) throw new Error('The guide is closed. Type /ai in game to bring back the journal tab.');
   if (method === 'snapshot') {
     const section = args.section || 'all';
     if (!['all', 'player', 'location', 'target', 'quests', 'inventory', 'equipment', 'professions', 'integrations','stats','talents','pet','spells','reputations','currencies','actionBars','completedQuests','auras','bank','combat','auctions'].includes(section)) throw new Error('Unknown section');
+    if(section==='combat'){const detail=combatLog.summary(state.snapshot?.snapshot);if(detail.available&&ageSeconds!==null&&ageSeconds<=90)return {ageSeconds:detail.recording.lastEventAgeSeconds,stale:false,data:detail};}
     const timestamp=section==='all'?state.snapshot?.sectionTimes?.core || state.snapshot?.receivedAt:state.snapshot?.sectionTimes?.[section] || (state.snapshot?.snapshot?.[section]?state.snapshot.receivedAt:0);
     let refreshed=null;
     if(args.refresh && (!timestamp || Date.now()-timestamp>5000)) refreshed=await refreshSnapshot(section);
@@ -970,12 +974,28 @@ if (!exitWhenIdle && cfg.copilot) IPC.serve(async (method, args) => {
     const seconds=Number(args.seconds ?? (method==='measure-combat'?10:30));
     if(!Number.isInteger(seconds)||seconds<1||seconds>(method==='measure-combat'?30:300)) throw new Error('Invalid combat window.');
     if(!state.snapshot?.snapshot?.player?.guid || ageSeconds===null || ageSeconds>90) throw new Error('Fresh character context required.');
-    const guid=state.snapshot.snapshot.player.guid;
+    for(const [name,min,max] of [['eventLimit',1,200],['eventOffset',0,16000],['spellID',1,10000000]])if(args[name]!==undefined&&(!Number.isSafeInteger(args[name])||args[name]<min||args[name]>max))throw new Error('Invalid '+name);
+    for(const key of ['sourceGUID','targetGUID'])if(args[key]!==undefined&&(typeof args[key]!=='string'||args[key].length>100))throw new Error('Invalid '+key);
+    const windowEnd=args.windowEnd===undefined?undefined:Date.parse(args.windowEnd);
+    if(args.windowEnd!==undefined&&(!Number.isFinite(windowEnd)||windowEnd>Date.now()+1000||windowEnd<Date.now()-300000))throw new Error('Invalid combat window end.');
+    const guid=state.snapshot.snapshot.player.guid,session=state.snapshot.session;
+    combatLog.read();
+    if(method==='measure-combat'&&combatLog.status().readable){
+      const from=Date.now(),to=from+seconds*1000;
+      const valid=()=>state.copilotEnabled!==false&&state.snapshot?.session===session&&state.snapshot?.snapshot?.player?.guid===guid;
+      while(Date.now()<to){if(!valid())throw new Error('Measurement cancelled: character changed or guide closed.');await new Promise(resolve=>setTimeout(resolve,100));combatLog.read();}
+      // Give the client's disk buffer a short chance to flush without changing the window.
+      let detail;
+      for(let n=0;n<7;n++){if(!valid())throw new Error('Measurement cancelled: character changed or guide closed.');detail=combatLog.summary(state.snapshot.snapshot,{...args,seconds,from,to});if(detail.recording.lastEventAt&&Date.parse(detail.recording.lastEventAt)>=to)break;if(n<6)await new Promise(resolve=>setTimeout(resolve,500));}
+      return {character:state.snapshot.snapshot.player,...detail,measurement:{durationSeconds:seconds,complete:true,coverageComplete:detail.coverageComplete,from:new Date(from).toISOString(),to:new Date(to).toISOString()}};
+    }
+    const detail=combatLog.summary(state.snapshot.snapshot,{...args,seconds,to:windowEnd});
+    if(method==='combat'&&detail.available)return {character:state.snapshot.snapshot.player,...detail};
     const refreshed=await refreshSnapshot('combat',{seconds,includePets:args.includePets!==false,...(method==='measure-combat'?{measureSeconds:seconds}:{})});
-    if(!refreshed.updated) return {available:false,reason:refreshed.reason};
+    if(!refreshed.updated) return {available:false,reason:refreshed.reason,detailedRecording:detail.recording};
     if(state.snapshot?.snapshot?.player?.guid!==guid) throw new Error('Character changed during the measurement.');
     const data=state.snapshot.snapshot.combat;
-    return {ageSeconds:Math.round((Date.now()-state.snapshot.receivedAt)/1000),character:state.snapshot.snapshot.player,...data};
+    return {ageSeconds:Math.round((Date.now()-state.snapshot.receivedAt)/1000),character:state.snapshot.snapshot.player,...data,detailedRecording:combatLog.status(),detailedReportHint:'For individual incoming/outgoing crits and exact windows, enable /combatlog in WoW. The companion reads the local file automatically.'};
   }
 
   if (method === 'auctions' || method === 'auction-search') {

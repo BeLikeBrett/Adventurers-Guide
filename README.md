@@ -6,9 +6,11 @@ A character-aware companion for **WoW: Forever**.
 
 - Live character data and Forever guides.
 - GearQuest/Dungeon Journal comparisons with native item cards.
-- Combat breakdowns, crits, pets and timed measurements.
+- Incoming/outgoing combat reports, crits, pets and timed measurements.
 - Auctionator prices and character memory.
 - Minimap launcher, smooth scrolling, resizing and model/effort controls.
+
+Type **/combatlog** in WoW to record detailed hits; otherwise reports use built-in fight totals.
 
 **Ctrl+Alt+middle-click** attaches items, spells and quests—also in chat and loot rolls.
 

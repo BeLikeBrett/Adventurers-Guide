@@ -1598,3 +1598,43 @@ test('loading a cache with data succeeds even when the client omits the loaded r
  vm.run('C_AddOns.LoadAddOn=function(name) STUB.loaded[name]=true;STUB.onLoadAddOn(name);return nil end;STUB.now=STUB.now+6;STUB.Tick()');
  assert.equal(vm.evaluate('WoWAIDB.chats[1].pendingId'),null);
 });
+
+test('Forever native meter reports local whole-fight incoming and outgoing without inventing crits',()=>{
+ const vm=newVM();login(vm);
+ vm.run(`
+  UnitGUID=function(u) return u=="player" and "Player-mine" end
+  UnitAffectingCombat=function() return false end
+  C_DamageMeter={GetCombatSessionFromType=function(session,kind)
+   assert(session==1)
+   return {durationSeconds=12,combatSources={{sourceGUID="Player-party",name="Other",totalAmount=9000},{isLocalPlayer=true,sourceGUID="Player-mine",name="You",totalAmount=kind==7 and 110 or 320,amountPerSecond=26.6}}}
+  end,GetCombatSessionSourceFromType=function(session,kind,guid)
+   assert(guid=="Player-mine")
+   return {combatSpells=kind==7 and {{spellID=88,totalAmount=80},{spellID=99,totalAmount=30}} or {{spellID=75,totalAmount=220},{spellID=17253,totalAmount=100}}}
+  end}
+  C_Spell={GetSpellInfo=function(id) return {name="Ability "..id} end}
+ `);
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');
+ vm.run('WoWAI.SetCombatEnabled(true);native=WoWAI.CombatSnapshot(30)');
+ assert.equal(vm.evaluate('native.available'),'true');assert.equal(vm.num('native.outgoing.damage'),320);assert.equal(vm.num('native.incoming.damage'),110);
+ assert.equal(vm.num('native.incomingAbilities[1].damage'),80);assert.equal(vm.num('native.abilities[1].spellID'),75);
+ assert.equal(vm.evaluate('native.windowMode'),'fightAggregate');assert.equal(vm.num('native.windowSeconds'),12);assert.equal(vm.num('native.requestedWindowSeconds'),30);
+ assert.equal(vm.evaluate('native.capabilities.crits'),'false');assert.equal(vm.evaluate('native.outgoing.crits'),null);
+ vm.run('WoWAI.QueueSnapshot=function(_,section,token) nativeDelivered=token;return true end;WoWAI.BeginCombatMeasurement(10,77);timed=WoWAI.CollectCombatRequest(77)');
+ assert.equal(vm.evaluate('timed.measurement.complete'),'false');assert.equal(vm.evaluate('timed.measurement.supported'),'false');assert.equal(vm.num('nativeDelivered'),77);
+ vm.run('UnitAffectingCombat=function() return true end;C_DamageMeter.GetCombatSessionFromType=function() error("must not read protected fields in combat") end;busy=WoWAI.CombatSnapshot(30)');
+ assert.equal(vm.evaluate('busy.available'),'false');assert.match(vm.evaluate('busy.reason'),/during combat/);
+});
+
+test('native meter discards secret data and tolerates partial APIs without forbidden log registration',()=>{
+ const vm=newVM();login(vm);
+ vm.run(`
+  UnitGUID=function() return "Player-mine" end
+  UnitAffectingCombat=function() return false end
+  secret={};issecretvalue=function(v) return v==secret end
+  C_DamageMeter={GetCombatSessionFromType=function() return {combatSources={{isLocalPlayer=true,sourceGUID="Player-mine",totalAmount=secret}}} end}
+ `);
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');
+ vm.run('WoWAI.SetCombatEnabled(true);unreadable=WoWAI.CombatSnapshot(30)');assert.equal(vm.evaluate('unreadable.available'),'false');
+ vm.run('C_DamageMeter={};WoWAI.BeginCombatMeasurement(1,32)');
+ assert.equal(vm.evaluate('WoWAI.NativeCombatSnapshot(30)'),null);
+});

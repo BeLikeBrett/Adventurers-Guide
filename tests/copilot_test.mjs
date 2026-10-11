@@ -28,7 +28,7 @@ test('snapshot reassembly handles out-of-order packets, duplication and session 
 test('real bridge receives a desktop request, validates reply identity and publishes addon Lua', async () => {
   assert.ok(!fs.existsSync(SOCKET), 'Use a separate WOW_COPILOT_SOCKET for tests');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wow-copilot-integration-'));
-  const addon = path.join(dir, 'AddOns/WoWAI');
+  const addon = path.join(dir, 'Interface/AddOns/WoWAI');
   fs.mkdirSync(addon, { recursive: true });
   fs.writeFileSync(path.join(addon, 'WoWAI.toc'), '## Interface: 16001\n');
   const saved = path.join(dir, 'SavedVariables.lua');
@@ -118,6 +118,24 @@ test('real bridge receives a desktop request, validates reply identity and publi
       if(section==='combat') assert.equal(result.outgoing.damage,data.outgoing.damage);
       else assert.deepEqual(result.prices,data.prices);
     }
+    // Detailed log queries bypass the game's reply-cache latency entirely.
+    const logsDir=path.join(dir,'Logs');fs.mkdirSync(logsDir);
+    const logFile=path.join(logsDir,'WoWCombatLog.txt');
+    function combatLine(amount,at=Date.now(),source='Player-1',target='Enemy'){
+      const d=new Date(at),stamp=`${d.getUTCMonth()+1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}.${String(d.getUTCMilliseconds()).padStart(3,'0')}0`;
+      return `${stamp}  SPELL_DAMAGE,${source},"Actor",0x511,0x0,${target},"Target",0xa48,0x0,75,"Shot",0x1,${amount},-1,0x1,0,0,0,1,nil,nil,nil\n`;
+    }
+    fs.writeFileSync(logFile,combatLine(90,Date.now()-100));
+    const before=Date.now(),logResult=await request('combat',{seconds:30});
+    assert.equal(logResult.source,'Client combat-log file');assert.equal(logResult.outgoing.damage,90);assert.equal(logResult.outgoing.crits,1);
+    assert.ok(Date.now()-before<1000,'reads local numbers without a game refresh');
+    assert.equal((await request('snapshot',{section:'combat',refresh:true})).data.outgoing.damage,90);
+    const fixed=request('measure-combat',{seconds:1});
+    await new Promise(resolve=>setTimeout(resolve,200));fs.appendFileSync(logFile,combatLine(42));
+    await new Promise(resolve=>setTimeout(resolve,1000));fs.appendFileSync(logFile,combatLine(999));
+    const measured=await fixed;assert.equal(measured.outgoing.damage,42);assert.equal(measured.measurement.complete,true);assert.equal(measured.coverageComplete,false);
+    await assert.rejects(request('combat',{eventLimit:1000}),/Invalid eventLimit/);
+    await assert.rejects(request('combat',{windowEnd:'invalid'}),/Invalid combat window end/);
     await assert.rejects(request('combat',{seconds:301}),/Invalid combat/);
     await assert.rejects(request('measure-combat',{seconds:31}),/Invalid combat/);
     await assert.rejects(request('auctions',{itemIds:[-1]}),/Invalid auction/);
@@ -126,8 +144,11 @@ test('real bridge receives a desktop request, validates reply identity and publi
     function submitControl(id, text) {
       fs.writeFileSync(saved, `WoWAIDB = { ["outbox"] = { ["id"] = ${id}, ["session"] = "testsession", ["chat"] = "testchat", ["text"] = "${Buffer.from(text).toString('hex')}" } }`);
     }
+    const cancelled=request('measure-combat',{seconds:10}).then(()=>{throw new Error('Measurement must cancel');},e=>e);
+    await new Promise(resolve=>setTimeout(resolve,100));
     submitControl(9, '__COPILOT_CONTROL__:off');
     await waitFor(() => request('status').then(s => s.enabled === false));
+    assert.match((await cancelled).message,/Measurement cancelled/);
     await assert.rejects(request('snapshot', {}), /guide is closed/);
     await assert.rejects(request('screenshot', {}), /guide is closed/);
     submitControl(10, 'This must not start an agent');

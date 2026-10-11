@@ -11,7 +11,7 @@ BRIDGE = ['bridge.js', 'agents.js', 'protocol.js', 'install-slots.js',
           'capture_wayland.py', 'capture_x11.py', 'capture_mac.py', 'capture.ps1',
           'copilot-ipc.js', 'copilot-mcp.mjs', 'copilot-state.js', 'copilot-vision.js',
           'character-notes.js', 'forever-sources.js', 'addon-catalog.js', 'reference-cards.js',
-          'pixel_codec.py', 'prompt-context.js', 'setup-core.js', 'setup.mjs', 'setup.html', 'setup-ui.js']
+          'pixel_codec.py', 'prompt-context.js', 'combat-log.js', 'setup-core.js', 'setup.mjs', 'setup.html', 'setup-ui.js']
 ADDON = ['Codec.lua', 'Inbox.lua', 'WoWAI.lua', 'Map.lua', 'Integrations.lua',
          'References.lua', 'Combat.lua', 'Auctions.lua', 'Snapshot.lua', 'WoWAI.toc', 'Art/GuideIcon.tga', 'Art/GuideIcon.png']
 
