@@ -29,7 +29,7 @@ class SnapshotAssembler {
   }
 }
 class FrameAssembler {
-  constructor(){this.pending=new Map();}
+  constructor(){this.pending=new Map();this.completed=new Set();}
   accept(frame){
     if(!frame.text?.startsWith('__WIRE2__')) return frame;
     const match=/^__WIRE2__([a-f0-9-]{1,64}):(\d+):(\d+):(\d+):([\s\S]*)$/.exec(frame.text);
@@ -38,6 +38,7 @@ class FrameAssembler {
     if(total<1||total>8||part<1||part>total||Buffer.byteLength(data,'utf8')>640) return null;
     for(const [k,v] of this.pending) if(Date.now()-v.at>15000) this.pending.delete(k);
     const key=token+':'+id;
+    if(this.completed.has(key)) return null;
     if(this.pending.size>8&&!this.pending.has(key)) this.pending.delete(this.pending.keys().next().value);
     let set=this.pending.get(key);
     if(!set) this.pending.set(key,set={parts:new Map(),total,at:Date.now()});
@@ -46,6 +47,9 @@ class FrameAssembler {
     if(set.parts.size!==total) return null;
     const text=Array.from({length:total},(_,i)=>set.parts.get(i+1)).join('');
     if(Buffer.byteLength(text,'utf8')>3200) return null;
+    this.pending.delete(key);
+    this.completed.add(key);
+    if(this.completed.size>128) this.completed.delete(this.completed.values().next().value);
     return {id:Number(id),text};
   }
 }

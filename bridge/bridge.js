@@ -42,7 +42,7 @@ if (argv.includes('--help') || argv.includes('-h')) {
 let cfg;
 try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); }
 catch (e) {
-  console.error(`Cannot read ${CONFIG_FILE} (${e.message}).\nRun "node setup.js" in the wow-ai folder first.`);
+  console.error(`Cannot read ${CONFIG_FILE} (${e.message}).\nRun Start Guide.cmd (Windows) or Start Guide.sh (Linux) first.`);
   process.exit(2); // the supervisor doesn't restart on 2
 }
 const once = argv.includes('--once');
@@ -504,6 +504,7 @@ function submit(job) {
     log(`hello from session ${job.session}${pendingRestore ? ' (restore offered)' : ''}`);
     return;
   }
+  job.receivedAt ||= Date.now();
   const key = chatKey(job);
   if (desktopRequests.has(key)) return;
   if ((state.dispatchMode || cfg.copilot?.dispatchMode || 'codex') === 'desktop') {
@@ -518,15 +519,15 @@ function submit(job) {
     const token = `${job.session}:${job.id}`;
     if (delayed.has(token)) return;
     delayed.set(token, job); signal('ack', job.id, true);
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + 6000;
     const ready = () => {
       if (!delayed.has(token)) return;
       const collecting = [...snapshots.pending.keys()].some(k => k.startsWith(`${job.session}:`));
       const waiting = job.snapshotToken && (!state.snapshot || state.snapshot.session !== job.session || state.snapshot.token < job.snapshotToken);
-      if (!Context.matchingSnapshot(state.snapshot,job) && (collecting || waiting) && Date.now() < deadline) { setTimeout(ready, 750); return; }
+      if (!Context.matchingSnapshot(state.snapshot,job) && (collecting || waiting) && Date.now() < deadline) { setTimeout(ready, 100); return; }
       delayed.delete(token); job.snapshotWaited = true; submit(job);
     };
-    setTimeout(ready, 750);
+    setTimeout(ready, 100);
     return;
   }
   const cur = running.get(key);
@@ -551,6 +552,7 @@ function drainQueue() {
 }
 
 function runJob(job) {
+  job.startedAt = Date.now();
   const key = chatKey(job);
   const cwd = cfg.copilot ? DEFAULT_CWD : resolveCwd(job.cwd);
   job.cwd = cwd;
@@ -620,9 +622,9 @@ function runJob(job) {
 
   const lightweight = /^\s*(hi|hey|hello|thanks|thank you|ty|yo|sup)[.!?\s]*$/i.test(job.text);
   const usableSnapshot=state.snapshot&&state.snapshot.session===job.session&&Date.now()-state.snapshot.receivedAt<=90000?state.snapshot:null;
-  const snapshot = usableSnapshot && !lightweight ? `\nStructured snapshot (received ${new Date(usableSnapshot.receivedAt).toISOString()}, may be stale):\n${JSON.stringify(Context.promptSnapshot(usableSnapshot))}` : '';
+  const snapshot = usableSnapshot && !lightweight ? `\nStructured snapshot (received ${new Date(usableSnapshot.receivedAt).toISOString()}, may be stale):\n${JSON.stringify(Context.promptSnapshot(usableSnapshot,Date.now(),job.text))}` : '';
   const recent = cfg.copilot && character ? (transcripts.chats[job.chat]?.messages || []).filter(m => m.id !== job.id && m.characterKey === character.key && ['user', 'assistant'].includes(m.role)).slice(-4).map(m => `${m.role}: ${m.text.slice(0, 450)}`).join('\n') : '';
-  const legacyContext=!cfg.copilot||(state.context?.session===job.session&&Date.now()-state.context.at<=90000)?gameContext():'';
+  const legacyContext=!cfg.copilot||(!usableSnapshot&&state.context?.session===job.session&&Date.now()-state.context.at<=90000)?gameContext():'';
   const ctx = legacyContext + (cfg.copilot ? '\nGame identity: World of Warcraft: Forever. Never silently substitute Classic or Retail mechanics.\n' + snapshot + notebook.prompt(character) + (recent ? '\nRecent conversation excerpts (may be incomplete):\n' + recent : '') : '');
   const images = [];
   if (cfg.copilot?.vision && !lightweight && Context.needsVision(job.text)) {
@@ -632,6 +634,9 @@ function runJob(job) {
   const systemShort = cfg.copilot ? Context.guidePrompt(ctx, '', job.text) : P.systemPrompt(ctx, '');
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
   const input = agent.input({ prompt: job.text, system, systemShort, resume, cfg: acfg, images });
+  job.inputCharacters = system.length + job.text.length;
+  job.selectedModel = acfg.model;
+  job.selectedEffort = job.effort || cfg.copilot?.effort || 'low';
   if (input.promptFile !== undefined) {
     try { fs.mkdirSync(TMP_DIR, { recursive: true }); fs.writeFileSync(promptFile, input.promptFile); }
     catch (e) { finish(job, 'error', `Could not write the prompt file ${promptFile}: ${e.message}`); return; }
@@ -775,6 +780,11 @@ function finish(job, status, text, session, denied) {
   if (job.finished) return; // spawn failures fire both 'error' and 'close'
   job.finished = true;
   running.delete(chatKey(job));
+  if (job.startedAt) {
+    const now = Date.now();
+    state.lastReplyTiming = { waitMs:job.startedAt-(job.receivedAt||job.startedAt), modelAndToolsMs:now-job.startedAt, totalMs:now-(job.receivedAt||job.startedAt), inputCharacters:job.inputCharacters, model:job.selectedModel, effort:job.selectedEffort };
+    log(`Reply timing: ${JSON.stringify(state.lastReplyTiming)}`);
+  }
   markHandled(job);
   saveState();
   // A finished reply ends with the "TL;DR:" block the system prompt asks for:
@@ -943,7 +953,7 @@ async function performSnapshotRefresh(section,options={}) {
 // still has a single writer; MCP never edits state/slot files itself.
 if (!exitWhenIdle && cfg.copilot) IPC.serve(async (method, args) => {
   const ageSeconds = state.snapshot ? Math.round((Date.now() - state.snapshot.receivedAt) / 1000) : null;
-  if (method === 'status') return { running: true, enabled: state.copilotEnabled !== false, addonInstalled: addonInstalled(), mode: state.dispatchMode || cfg.copilot.dispatchMode || 'codex', snapshotAgeSeconds: ageSeconds, snapshotStale: ageSeconds === null || ageSeconds > 90, automaticJobs: running.size, pendingRequests: desktopRequests.size };
+  if (method === 'status') return { running: true, enabled: state.copilotEnabled !== false, addonInstalled: addonInstalled(), mode: state.dispatchMode || cfg.copilot.dispatchMode || 'codex', snapshotAgeSeconds: ageSeconds, snapshotStale: ageSeconds === null || ageSeconds > 90, automaticJobs: running.size, pendingRequests: desktopRequests.size, lastReplyTiming:state.lastReplyTiming || null };
   if (state.copilotEnabled === false && !['requests', 'mode'].includes(method)) throw new Error('The guide is closed. Type /ai in game to bring back the journal tab.');
   if (method === 'snapshot') {
     const section = args.section || 'all';

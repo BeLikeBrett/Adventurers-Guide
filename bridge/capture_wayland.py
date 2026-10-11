@@ -112,6 +112,7 @@ def main():
         return
     last, warning, warned_at = None, '', 0
     while True:
+        delay = max(args.interval_ms, 100)
         try:
             image = capture(args.process_name, True, args.cell, args.cells, args.max_rows, args.anchor)
             msg = decode(image, args.cell, args.cells, args.max_rows)
@@ -124,7 +125,8 @@ def main():
                 print(json.dumps({'warn': str(exc)}), flush=True)
                 warning, warned_at = str(exc), time.monotonic()
             last = None
-        time.sleep(max(args.interval_ms, 100) / 1000)
+            delay = max(delay, 1000)
+        time.sleep(delay / 1000)
 
 
 if __name__ == '__main__':

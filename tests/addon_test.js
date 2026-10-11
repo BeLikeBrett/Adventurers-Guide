@@ -74,12 +74,14 @@ function readPixelFrame(vm) {
 }
 
 function decodeStrip(vm) {
+  // Each inspection reads the current strip, independently of production deduplication.
+  const wire=new FrameAssembler();
   let result,previousToken;
   for(let tick=0;tick<20;tick++) {
     const frame=readPixelFrame(vm);
     if(!frame) return result||null;
     const match=/^__WIRE2__([a-f0-9-]+):\d+:(\d+):(\d+):/.exec(frame.text);
-    const accepted=vm.wire.accept(frame);
+    const accepted=wire.accept(frame);
     if(accepted) result=accepted;
     if(result&&match&&previousToken===match[1]&&Number(match[2])===1) return result;
     if(match) previousToken=match[1];
@@ -1541,4 +1543,22 @@ test('Blizzard chat send methods stay untouched and blocked-action diagnostics a
  assert.equal(vm.evaluate('ChatFrame1EditBox.ProcessChatType==ORIGINAL_CHAT_SEND'),'true');
  vm.run('STUB.FireEvent("ADDON_ACTION_BLOCKED","WoWAI","Frame:RegisterEvent()")');
  assert.equal(vm.evaluate('WoWAIDB.lastBlockedAction.action'),'Frame:RegisterEvent()');
+});
+
+
+test('questions prioritize a small player update while explicit tool refreshes retain priority',()=>{
+ const vm=newVM();login(vm);connect(vm);
+ vm.run(fs.readFileSync(path.join(ADDON,'Snapshot.lua'),'utf8'),'WoWAI');
+ vm.run('WoWAI.QueueSnapshot(false);before=WoWAIDB.snapshotSeq;WoWAI.Send("Where do I go?")');
+ assert.equal(vm.num('WoWAIDB.snapshotSeq'),vm.num('before')+1);
+ const records=stripRecords(vm);
+ const snapshot=records.find(r=>r.text.startsWith('__COPILOT1__'));
+ assert.ok(snapshot.text.includes('"section":"player"'));
+ const question=records.find(r=>r.text==='Where do I go?');
+ assert.ok(question.flags.includes('snapshot='+vm.num('WoWAIDB.snapshotSeq')));
+ const other=newVM();login(other);connect(other);
+ other.run(fs.readFileSync(path.join(ADDON,'Snapshot.lua'),'utf8'),'WoWAI');
+ other.run('WoWAI.QueueSnapshot(false,"equipment","explicit-request");before=WoWAIDB.snapshotSeq;WoWAI.Send("Compare this item")');
+ assert.equal(other.num('WoWAIDB.snapshotSeq'),other.num('before'));
+ assert.ok(!stripRecords(other).find(r=>r.text==='Compare this item').flags.includes('snapshot='));
 });

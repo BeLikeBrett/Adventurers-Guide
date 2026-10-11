@@ -1286,7 +1286,7 @@ function WoWAI.Send(text, allow)
 	end
 	-- The game context rides along when the bridge doesn't have this version yet.
 	local ctx = ContextToSend(limit - #text)
-    if WoWAI.QueueSnapshot then WoWAI.QueueSnapshot() end
+    local promptSnapshot = WoWAI.QueueSnapshot and WoWAI.QueueSnapshot(false,"player",nil,true)
 
 	db.lastSeq = db.lastSeq + 1
 	local id = db.lastSeq
@@ -1295,7 +1295,7 @@ function WoWAI.Send(text, allow)
 	if c.agent and c.agent ~= "" then table.insert(tokens, "agent=" .. c.agent) end
 	table.insert(tokens, "model=" .. (c.model or db.settings.model))
     table.insert(tokens, "effort=" .. (c.effort or db.settings.effort))
-    if run.snapshotActive then table.insert(tokens,"snapshot="..tostring(db.snapshotSeq)) end
+    if promptSnapshot then table.insert(tokens,"snapshot="..tostring(promptSnapshot)) end
 	local allowHex
 	if type(allow) == "table" and #allow > 0 then
 		table.insert(tokens, "allow=" .. table.concat(allow, ","))
@@ -1370,11 +1370,11 @@ end
 
 -- Snapshot packets use reserved record 0 and timed repetition, so refreshing
 -- context never consumes reply slots or the finite one-shot sound ACK pool.
-function WoWAI.QueueSnapshot(idle,section,requestToken)
+function WoWAI.QueueSnapshot(idle,section,requestToken,urgent)
     if not db or db.settings.copilotEnabled == false or not db.settings.context or db.settings.mode ~= "pixel" or not WoWAI.SnapshotJSON then return end
     if run.snapshotActive then
-        if requestToken then
-            -- Relevant MCP refreshes preempt background/redundant transmissions.
+        if requestToken or (urgent and not run.snapshotRequestToken) then
+            -- Player questions preempt background work; explicit tool refreshes retain priority.
             run.snapshotGeneration=nil;run.snapshotActive=nil;run.outbound[0]=nil
             run.pixelQueued=nil
         else return end
@@ -1393,11 +1393,13 @@ function WoWAI.QueueSnapshot(idle,section,requestToken)
     local token, step = db.snapshotSeq, 0
     run.snapshotActive = true
     run.snapshotGeneration = token
+    run.snapshotRequestToken = requestToken
     local function advance()
         if run.snapshotGeneration ~= token then return end
         step = step + 1
         if step > #chunks * 2 or not db.settings.context or db.settings.copilotEnabled == false then
             run.snapshotActive = nil
+            run.snapshotRequestToken = nil
             run.outbound[0] = nil
             RefreshStrip()
             return

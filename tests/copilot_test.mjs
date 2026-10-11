@@ -135,8 +135,17 @@ test('real bridge receives a desktop request, validates reply identity and publi
     assert.equal((await request('status')).automaticJobs, 0);
     submitControl(11, '__COPILOT_CONTROL__:on');
     await waitFor(() => request('status').then(s => s.enabled === true));
-    submitControl(12, 'hi');
+    // A question must start on its small fresh player update, even while a
+    // previous full snapshot has only partially arrived.
+    const started=Date.now();
+    const wireRecord=(id,flags,text)=>['testsession','testchat',String(id),'',flags,'',text].join('\x1f');
+    fs.writeFileSync(captureFile,JSON.stringify({id:12,text:[wireRecord(0,'h','__COPILOT1__100:1:2:{"schema":1,'),wireRecord(12,'snapshot=101','Where do I turn in my quest?')].join('\x1e')}));
+    await new Promise(resolve=>setTimeout(resolve,200));
+    assert.equal(fs.existsSync(pidFile),false,'waits for the requested fresh player generation');
+    const fresh={schema:1,section:'player',game:{name:'World of Warcraft: Forever'},player:{guid:'Player-1',name:'TestHunter',realm:'Beta',xp:2250},data:{guid:'Player-1',xp:2250}};
+    fs.writeFileSync(captureFile,JSON.stringify({id:0,text:wireRecord(0,'h','__COPILOT1__101:1:1:'+JSON.stringify(fresh))}));
     await waitFor(() => fs.existsSync(pidFile));
+    assert.ok(Date.now()-started<2500,'starts promptly without waiting for the unrelated full generation');
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
     assert.equal((await request('status')).automaticJobs, 1);
     submitControl(13, '__COPILOT_CONTROL__:off');
@@ -171,7 +180,7 @@ test('real MCP stdio handshake, schemas, calls and tool errors over owner-only I
     assert.ok(tools.find(t => t.name === 'get_game_state').annotations.readOnlyHint);
     const status = await client.callTool({ name: 'get_status', arguments: {} });
     assert.equal(JSON.parse(status.content[0].text).running, true);
-    await client.callTool({ name: 'get_game_state', arguments: { section: 'player' } });
+    await client.callTool({ name: 'get_game_state', arguments: {} });
     assert.deepEqual(calls.at(-1), { method: 'snapshot', args: { section: 'player', refresh:true } });
     const bad = await client.callTool({ name: 'reply_to_request', arguments: { id: -1, text: 'x' } });
     assert.equal(bad.isError, true);
@@ -192,6 +201,9 @@ test('compact wire fragments reassemble Unicode messages and reject oversized or
  const packet=(part,text,token=1)=>({id:7,text:`__WIRE2__${token}:7:${part}:2:${text}`});
  assert.equal(a.accept(packet(2,'🐘 end')),null);
  assert.equal(a.accept(packet(1,'hello ')).text,'hello 🐘 end');
+ assert.equal(a.pending.size,0);
+ assert.equal(a.accept(packet(2,'🐘 end')),null);
+ assert.equal(a.accept(packet(1,'hello ')),null);
  assert.equal(a.accept(packet(1,'new ',2)),null);
  assert.equal(a.accept({id:7,text:'__WIRE2__3:7:1:99:x'}),null);
  assert.equal(a.accept({id:7,text:'__WIRE2__3:7:1:1:'+ 'x'.repeat(641)}),null);

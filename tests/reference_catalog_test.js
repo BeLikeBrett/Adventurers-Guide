@@ -74,3 +74,20 @@ test('Guide prompts avoid legacy coding-agent instructions and duplicate closing
  assert.ok(!prompt.includes('wowmacro'));
  assert.ok(guidePrompt('','', 'Write a macro').includes('255 characters'));
 });
+
+
+test('question context keeps relevant data and exposes omitted sections without implying emptiness',()=>{
+ const {promptSnapshot}=require('../bridge/prompt-context');
+ const snapshot={receivedAt:1000,snapshot:{player:{level:14},quests:[{id:1}],inventory:Array(120).fill({itemID:11853,name:'Rambling Boots',tooltip:'Leather boots, 51 Armor, 3 Agility, 1 Stamina'}),equipment:[{slot:8}],stats:{agility:24},talents:[{name:'Hunter'}],pet:{name:'Bear'}}};
+ const full=promptSnapshot(snapshot,1500);
+ const quest=promptSnapshot(snapshot,1500,'Where do I turn in my quest?');
+ assert.equal(quest.inventory,undefined);assert.equal(quest.equipment,undefined);assert.equal(quest.quests.length,1);
+ assert.ok(JSON.stringify(quest).length<JSON.stringify(full).length/3);
+ const gear=promptSnapshot(snapshot,1500,'Are these good? item:11853');
+ assert.deepEqual(gear.equipment,snapshot.snapshot.equipment);assert.equal(gear.inventory.length,120);
+ const combat=promptSnapshot(snapshot,1500,'Rank my damage and crits');
+ assert.deepEqual(combat.pet,snapshot.snapshot.pet);assert.equal(combat.quests,undefined);
+ assert.ok(combat.omitted.explanation.includes('does not mean empty'));
+ const partial=promptSnapshot({receivedAt:1000,snapshot:{player:{level:14}}},1500,'Where do I go?');
+ assert.equal(partial.quests,undefined);assert.equal(partial.inventory,undefined);
+});
