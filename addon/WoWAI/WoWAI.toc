@@ -2,7 +2,7 @@
 ## Title: Adventurer's Guide
 ## Notes: Character-aware quest, gear and dungeon guidance. Requires the companion.
 ## Author: BeLikeBrett, chelinho139
-## Version: 0.7.2
+## Version: 0.7.3
 ## SavedVariables: WoWAIDB, WoWAIMapDB
 ## OptionalDeps: WoWAI_Nodes, GearQuestForever, ForeverDungeonJournal, Auctionator
 ## IconTexture: Interface\AddOns\WoWAI\Art\GuideIcon

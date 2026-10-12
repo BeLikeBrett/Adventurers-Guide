@@ -198,6 +198,7 @@ local function InitDB()
 	local s = db.settings
 	if s.autoRefresh == nil then s.autoRefresh = true end
 	if s.signal == nil then s.signal = true end
+	if s.autoCombatLog == nil then s.autoCombatLog = true end
 	if s.context == nil then s.context = true end -- tell the agent about the character, zone, etc.
 	-- How much of each reply to print in the game chat. "summary" (the agent's
 	-- closing TL;DR lines) replaced "full" as the default; an install that still
@@ -3627,6 +3628,7 @@ local HELP = table.concat({
     "/ai clear                     clear this conversation",
     "/ai context on|off            share or stop sharing your character details",
     "/ai map                       show route and map options",
+    "/ai logging on|off            automatic combat recording (on by default)",
     "/ai reload                    refresh the guide if replies stop arriving",
     "Hover an item, spell, or quest and use Ctrl+Alt+middle-click to attach its tooltip.",
     "/ai linkkey <key>|off          choose a free attachment shortcut or disable it",
@@ -3654,6 +3656,7 @@ end
 local COMMAND_ARGS = {
 	mini = 0, min = 0, hide = 0, quit = 0, help = 0, clear = 0, delete = 0, reset = 0, copy = 0,
 	cancel = 0, resend = 0, reload = 0, refresh = 0, slots = 0, diag = 0,
+	logging = { [""] = true, on = true, off = true },
 	context = { [""] = true, on = true, off = true }, ctx = { [""] = true, on = true, off = true },
 	mode = { [""] = true, pixel = true, reload = true },
 	signal = { [""] = true, on = true, off = true }, longchat = { [""] = true, on = true, off = true },
@@ -3765,6 +3768,11 @@ SlashCmdList["WOWAI"] = function(msg)
 			.. "\n\nTip: hover a bag item or spellbook spell, then press your attachment shortcut to share its tooltip.")
 		WoWAI.Render()
 		WoWAI.Toggle(true)
+	elseif cmd == "logging" then
+        if rest=="on" or rest=="off" then WoWAI.SetAutoCombatLogging(rest=="on") end
+        local status=WoWAI.CombatLoggingStatus()
+        AddHistory(c,"system","Automatic combat recording: "..(status.automatic and "on" or "off")..". "..(status.recording and "Recording." or "Not recording.")..(status.reason and (" "..status.reason) or ""))
+        WoWAI.Render()
 	elseif cmd == "mode" then
 		if rest == "pixel" or rest == "reload" then
 			s.mode = rest
@@ -3856,6 +3864,7 @@ SlashCmdList["WOWAI"] = function(msg)
 			"presence: head at " .. tostring(run.presence and run.presence.last or "?") .. ", beats seen: " .. tostring(run.presence and run.presence.beats or 0),
 			select(5, WoWAI.BridgeState()),
 			"mode: " .. s.mode .. ", session token: " .. tostring(db.session),
+            "combat recording: " .. (WoWAI.CombatLoggingStatus and tostring(WoWAI.CombatLoggingStatus().recording) or "unavailable"),
 		}
 		for _, ch in ipairs(db.chats) do
 			local a = run.act and run.act[ch.id]

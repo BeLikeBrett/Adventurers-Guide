@@ -30,11 +30,54 @@ local function refreshOwners()
     local pet=call(UnitGUID,"pet")
     if pet then owners[pet]={name=call(UnitName,"pet"),kind="pet",lastSeen=GetTime()} end
 end
+-- The file writer is an unrestricted client feature, independent of secret events.
+local loggingReason
+local function logState()
+    if type(LoggingCombat)~="function" then return nil,"Combat logging is unavailable in this client." end
+    local ok,state=pcall(LoggingCombat)
+    if not ok then return nil,"The client did not allow reading the combat logging setting." end
+    local value,readable=safe(state)
+    if not readable or type(value)~="boolean" then return nil,"The combat logging state is unreadable." end
+    return value
+end
+function WoWAI.CombatLoggingStatus()
+    local state,reason=logState()
+    local settings=WoWAIDB and WoWAIDB.settings or {}
+    return {available=state~=nil,recording=state,automatic=settings.autoCombatLog~=false,
+        startedByGuide=settings.guideStartedCombatLog==true,reason=loggingReason or reason}
+end
+function WoWAI.SyncCombatLogging()
+    local settings=WoWAIDB and WoWAIDB.settings
+    if not settings then return end
+    local state,reason=logState();loggingReason=reason
+    if state==nil then return end
+    local wanted=enabled and settings.autoCombatLog~=false
+    if not state then settings.guideStartedCombatLog=nil end
+    if wanted and not state then
+        -- Advanced logs include the owner GUID used for guardians and minions.
+        local setCVar=(C_CVar and C_CVar.SetCVar) or SetCVar
+        if type(setCVar)=="function" then pcall(setCVar,"advancedCombatLogging","1") end
+        local ok=pcall(LoggingCombat,true)
+        local active=logState()
+        if ok and active==true then settings.guideStartedCombatLog=true;loggingReason=nil
+        else loggingReason="The client did not start combat logging. Use /combatlog to enable it." end
+    elseif not wanted and state and settings.guideStartedCombatLog then
+        pcall(LoggingCombat,false)
+        if logState()==false then settings.guideStartedCombatLog=nil end
+    end
+end
+function WoWAI.SetAutoCombatLogging(value)
+    if not WoWAIDB or not WoWAIDB.settings then return end
+    WoWAIDB.settings.autoCombatLog=value~=false
+    WoWAI.SyncCombatLogging()
+    return WoWAI.CombatLoggingStatus()
+end
 function WoWAI.SetCombatEnabled(value)
     enabled=value~=false
     events,owners,swings,samples={}, {}, {}, {};first=1;measurement=nil;droppedUntil=nil;playerGUID=nil;restricted=false
     started=enabled and GetTime() or nil
     if enabled then refreshOwners() end
+    WoWAI.SyncCombatLogging()
 end
 local function prune(now)
     for guid,owner in pairs(owners) do if owner.kind~="player" and now-(owner.lastSeen or now)>KEEP_SECONDS then owners[guid]=nil;swings[guid]=nil end end
@@ -291,8 +334,10 @@ local function registerCombatReader()
 end
 registerCombatReader()
 frame:RegisterEvent("PLAYER_LOGIN")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent",function(_,event)
     if event=="PLAYER_LOGIN" then registerCombatReader();WoWAI.SetCombatEnabled(not WoWAIDB or WoWAIDB.settings.copilotEnabled~=false);return end
+    if event=="PLAYER_ENTERING_WORLD" then WoWAI.SyncCombatLogging();return end
     if not enabled or event~=registeredEvent then return end
     local getter=combatReader()
     if type(getter)=="function" then local ok=pcall(function() WoWAI.RecordCombatEvent(getter()) end);if not ok then restricted=true end end

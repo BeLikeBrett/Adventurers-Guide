@@ -79,6 +79,7 @@ function WoWAI.CollectSnapshot(section,requestToken)
     snapshot.player.realm = call(GetRealmName)
     snapshot.player.addonIssue = WoWAIDB and WoWAIDB.lastBlockedAction or nil
     snapshot.player.transport = call(WoWAI.TransportStatus)
+    snapshot.player.combatLogging = call(WoWAI.CombatLoggingStatus)
     snapshot.player.money = call(GetMoney)
     snapshot.player.faction = call(UnitFactionGroup, "player")
     snapshot.player.xp = call(UnitXP, "player")

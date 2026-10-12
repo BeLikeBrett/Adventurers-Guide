@@ -1638,3 +1638,35 @@ test('native meter discards secret data and tolerates partial APIs without forbi
  vm.run('C_DamageMeter={};WoWAI.BeginCombatMeasurement(1,32)');
  assert.equal(vm.evaluate('WoWAI.NativeCombatSnapshot(30)'),null);
 });
+
+test('combat logging defaults on silently, enables advanced recording once and stops only owned logging',()=>{
+ const vm=newVM();vm.run(`
+  recording=false;logCalls={};advancedCalls={}
+  LoggingCombat=function(value) if value~=nil then recording=value;logCalls[#logCalls+1]=value end;return recording end
+  C_CVar={SetCVar=function(key,value) advancedCalls[#advancedCalls+1]=key..":"..value end}
+ `);
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');login(vm);
+ assert.equal(vm.evaluate('WoWAIDB.settings.autoCombatLog'),'true');assert.equal(vm.evaluate('recording'),'true');assert.equal(vm.num('#logCalls'),1);
+ assert.equal(vm.evaluate('advancedCalls[1]'),'advancedCombatLogging:1');assert.equal(vm.evaluate('WoWAI.CombatLoggingStatus().startedByGuide'),'true');
+ vm.run('WoWAI.SyncCombatLogging()');assert.equal(vm.num('#logCalls'),1,'no redundant toggling');
+ vm.run('WoWAI.SetCombatEnabled(false)');assert.equal(vm.evaluate('recording'),'false');
+ vm.run('recording=true;WoWAI.SetCombatEnabled(true);WoWAI.SetCombatEnabled(false)');assert.equal(vm.evaluate('recording'),'true','preserves manually or externally started recording');
+});
+
+test('combat logging opt-out persists and slash commands do not send questions or change chat visibility',()=>{
+ const vm=newVM('WoWAIDB={settings={autoCombatLog=false}}');vm.run('recording=false;LoggingCombat=function(v) if v~=nil then recording=v end;return recording end');
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');login(vm);
+ assert.equal(vm.evaluate('recording'),'false');
+ vm.run('SlashCmdList.WOWAI("logging on")');assert.equal(vm.evaluate('recording'),'true');assert.equal(vm.evaluate('WoWAIDB.settings.autoCombatLog'),'true');
+ vm.run('SlashCmdList.WOWAI("logging off")');assert.equal(vm.evaluate('recording'),'false');assert.equal(vm.evaluate('WoWAIDB.settings.autoCombatLog'),'false');
+ assert.equal(vm.evaluate('WoWAIDB.chats[1].pendingId'),null);
+ vm.run('WoWAI.SetCombatEnabled(true)');assert.equal(vm.evaluate('recording'),'false');
+});
+
+test('failed or unreadable logging APIs remain unknown and never claim recording',()=>{
+ const vm=newVM();vm.run('LoggingCombat=function() error("not available") end');
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');login(vm);
+ assert.equal(vm.evaluate('WoWAI.CombatLoggingStatus().available'),'false');assert.equal(vm.evaluate('WoWAI.CombatLoggingStatus().recording'),null);
+ vm.run('LoggingCombat=function() return false end;WoWAI.SyncCombatLogging()');
+ assert.equal(vm.evaluate('WoWAI.CombatLoggingStatus().recording'),'false');assert.match(vm.evaluate('WoWAI.CombatLoggingStatus().reason'),/did not start/);
+});

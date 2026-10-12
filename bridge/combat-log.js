@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {StringDecoder}=require('node:string_decoder');
 const KEEP_MS=300000,MAX_EVENTS=16000,MAX_READ=4*1024*1024;
-const damageEvents=new Set(['SWING_DAMAGE','RANGE_DAMAGE','SPELL_DAMAGE','SPELL_PERIODIC_DAMAGE','DAMAGE_SHIELD','DAMAGE_SPLIT','ENVIRONMENTAL_DAMAGE']);
+const damageEvents=new Set(['SWING_DAMAGE','SWING_DAMAGE_LANDED','RANGE_DAMAGE','SPELL_DAMAGE','SPELL_PERIODIC_DAMAGE','DAMAGE_SHIELD','DAMAGE_SPLIT','ENVIRONMENTAL_DAMAGE']);
 const numeric=v=>v!==''&&v!=='nil'&&v!==undefined&&Number.isFinite(Number(v))?Number(v):null;
 const positive=v=>Math.max(0,numeric(v)||0);
 const flag=v=>v==='1'||v==='true';
@@ -40,7 +40,7 @@ function parseLine(line,now=Date.now(),version){
  if(f[0]==='COMBAT_LOG_VERSION')return {header:true,version:numeric(f[1]),advanced:f[f.indexOf('ADVANCED_LOG_ENABLED')+1]==='1',build:f[f.indexOf('BUILD_VERSION')+1]};
  if(f.length<9)return null;
  const event=f[0];
- if(event.includes('_SUPPORT')||event==='SWING_DAMAGE_LANDED')return null;
+ if(event.includes('_SUPPORT'))return null;
  const e={at:time.at,event,source:f[1],sourceName:f[2]==='nil'?null:f[2],sourceFlags:numeric(f[3]),dest:f[5],destName:f[6]==='nil'?null:f[6],destFlags:numeric(f[7])};
  const spell=event.startsWith('SPELL_')&&event!=='SPELL_ABSORBED'||event.startsWith('RANGE_')||['DAMAGE_SHIELD','DAMAGE_SPLIT'].includes(event);
  e.spellID=spell?numeric(f[9]):0;e.name=spell?f[10]:'Melee';e.school=spell?numeric(f[11]):1;
@@ -92,6 +92,17 @@ function parseLine(line,now=Date.now(),version){
   e.type='absorb';e.spellID=hasSpell?numeric(f[9]):0;e.name=hasSpell?f[10]:'Melee';e.shieldCaster=f[caster];e.shieldSpellID=numeric(f[shield]);e.shieldName=f[shield+1];e.amount=positive(f[amount]);e.critical=f.length===22||f.length===19?flag(f[amount+2]):undefined;return e;
  }
  return null;
+}
+function deduplicateSwings(events){
+ const pairs=new Map(),skip=new Set();
+ for(let i=0;i<events.length;i++){
+  const e=events[i];if(e.event!=='SWING_DAMAGE'&&e.event!=='SWING_DAMAGE_LANDED')continue;
+  const key=[e.at,e.source,e.dest,e.amount,e.overkill,e.school,e.critical].join(':');
+  let pair=pairs.get(key);if(!pair){pair={base:[],landed:[]};pairs.set(key,pair);}
+  pair[e.event==='SWING_DAMAGE'?'base':'landed'].push(i);
+ }
+ for(const pair of pairs.values())for(let n=0;n<Math.min(pair.base.length,pair.landed.length);n++)skip.add(pair.landed[n]);
+ return events.filter((e,i)=>!skip.has(i));
 }
 function totals(){return {damage:0,effectiveDamage:0,hits:0,crits:0,critDamage:0,normalDamage:0,misses:0,missTypes:{},absorbed:0,absorbEventsAmount:0,resisted:0,blocked:0,overkill:0,glancing:0,crushing:0,healing:0,effectiveHealing:0,overheal:0,casts:0,failedCasts:0,deaths:0,interrupts:0,dispels:0,minHit:null,maxHit:null};}
 function add(t,e){
@@ -154,7 +165,7 @@ class CombatLog {
   this.read();const now=this.now();to=to??now;from=from??to-seconds*1000;
   const player=snapshot?.player?.guid,pet=snapshot?.player?.petGUID||snapshot?.pet?.guid,status=this.status();
   if(!player)return {available:false,source:'Client combat-log file',reason:'Fresh character GUID is required.',recording:status};
-  const relevant=this.events.filter(e=>e.at>=from&&e.at<=to),owners=new Map([[player,'player']]);if(pet)owners.set(pet,'pet');
+  const relevant=deduplicateSwings(this.events).filter(e=>e.at>=from&&e.at<=to),owners=new Map([[player,'player']]);if(pet)owners.set(pet,'pet');
   // Ownership edges come only from GUIDs and summons, never pet family or party flags.
   const edges=new Map();
   const link=(parent,child)=>{if(parent&&child&&parent!==child){const children=edges.get(parent)||[];children.push(child);edges.set(parent,children);}};
@@ -174,7 +185,7 @@ class CombatLog {
   const abilities=new Map(),incoming=new Map(),attackers=new Map(),sources=new Map();
   let matched=0,filtered=0,allCasts=0,crits=0,incomingCrits=0;
   for(const e of relevant){const outgoing=mine(e.source)&&e.event!=='DAMAGE_SPLIT',hurt=e.dest===player,controlled=e.dest!==player&&mine(e.dest);if(!outgoing&&!hurt&&!controlled)continue;matched++;
-   const meta={spellID:e.spellID,name:e.name,school:e.school,periodic:e.periodic,hand:e.hand},key=[e.spellID,e.name,e.hand,e.periodic].join(':');
+   const meta={spellID:e.spellID,name:e.name,school:e.school,periodic:e.periodic,hand:e.hand},key=[e.spellID,e.name,e.spellID===0?e.hand:''].join(':');
    if(outgoing){add(r.outgoing,e);row(abilities,key,meta,e);row(sources,e.source,{guid:e.source,name:e.sourceName,kind:owners.get(e.source)},e);}
    if(hurt){add(r.incoming,e);row(incoming,[e.source,key].join(':'),{...meta,attacker:e.sourceName||'Environment',attackerGUID:e.source},e);row(attackers,e.source,{guid:e.source,name:e.sourceName||'Environment'},e);}
    if(controlled)add(r.incomingControlledUnits,e);

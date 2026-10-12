@@ -33,7 +33,7 @@ test('normal and modern advanced damage preserve actual health loss, mitigation,
  assert.equal(advanced.amount,100);assert.equal(advanced.rawAmount,150);assert.equal(advanced.critical,true);assert.equal(advanced.resisted,3);
  const swing=parseLine(line('SWING_DAMAGE',{advanced:true,off:'1',crit:'1'}),date,22);
  assert.equal(swing.hand,'offhand');assert.equal(swing.critical,true);assert.equal(swing.amount,100);
- assert.equal(parseLine(line('SWING_DAMAGE_LANDED',{advanced:true}),date,22),null);
+ assert.equal(parseLine(line('SWING_DAMAGE_LANDED',{advanced:true}),date,22).amount,100);
  assert.equal(parseLine(line('SPELL_DAMAGE_SUPPORT',{advanced:true}),date,22),null);
  const strange=line('SPELL_DAMAGE').replace(/,100,/,',100,99,88,');assert.equal(parseLine(strange,date).unsupported,true);
 });
@@ -116,4 +116,24 @@ test('environmental falls and modern normal logs preserve raw/crit field shifts'
  assert.equal(ordinary.amount,100);assert.equal(ordinary.rawAmount,150);assert.equal(ordinary.critical,true);
  const swing=line('SWING_DAMAGE',{advanced:true,off:'1',crit:'1'});const swings=csv(swing.slice(time(date-1000).length));swings.splice(9,19);const swingOrdinary=parseLine(time(date-1000)+swings.join(','),date,22);
  assert.equal(swingOrdinary.hand,'offhand');assert.equal(swingOrdinary.critical,true);
+});
+
+test('Forever landed-only incoming swings survive while paired swings count once across reads',()=>{
+ const f=fixture();try{
+  f.write([time(date-2000)+'COMBAT_LOG_VERSION,22,ADVANCED_LOG_ENABLED,0,BUILD_VERSION,1.60.1,PROJECT_ID,18',
+   line('SWING_DAMAGE_LANDED',{advanced:true,source:'Enemy',flags:'0xa48',dest:'Player-mine',amount:45,crit:'1'}),
+   line('SWING_DAMAGE',{advanced:true,amount:100})]);
+  assert.equal(f.log.summary(f.snapshot).incoming.damage,45);
+  f.append([line('SWING_DAMAGE_LANDED',{advanced:true,amount:100})]);const r=f.log.summary(f.snapshot);
+  assert.equal(r.outgoing.damage,100);assert.equal(r.incoming.damage,45);assert.equal(r.incoming.crits,1);
+  f.append([line('SWING_DAMAGE_LANDED',{advanced:true,source:'Enemy',flags:'0xa48',dest:'Player-mine',amount:45,crit:'1'})]);
+  assert.equal(f.log.summary(f.snapshot).incoming.damage,90,'identical events of the same kind remain distinct');
+ }finally{f.close();}
+});
+
+test('ranged casts, hits and misses share one ability total instead of zero-damage duplicates',()=>{
+ const f=fixture();try{
+  f.write([line('SPELL_CAST_SUCCESS'),line('RANGE_DAMAGE',{amount:25}),line('SPELL_MISSED')]);
+  const r=f.log.summary(f.snapshot);assert.equal(r.abilities.length,1);assert.equal(r.abilities[0].damage,25);assert.equal(r.abilities[0].hits,1);assert.equal(r.abilities[0].casts,1);assert.equal(r.abilities[0].misses,1);
+ }finally{f.close();}
 });
