@@ -137,3 +137,14 @@ test('ranged casts, hits and misses share one ability total instead of zero-dama
   const r=f.log.summary(f.snapshot);assert.equal(r.abilities.length,1);assert.equal(r.abilities[0].damage,25);assert.equal(r.abilities[0].hits,1);assert.equal(r.abilities[0].casts,1);assert.equal(r.abilities[0].misses,1);
  }finally{f.close();}
 });
+
+test('flushing an old segment and opening a new header does not lose the fight',()=>{
+ const f=fixture();try{
+  f.write([line('SPELL_DAMAGE',{amount:25,dest:'Sunscale-1',destName:'Sunscale'})]);f.log.read();
+  f.append([line('SPELL_DAMAGE',{amount:40,dest:'Sunscale-1',destName:'Sunscale'})]);
+  const second=path.join(path.dirname(f.file),'WoWCombatLog-new.txt');fs.writeFileSync(second,time(date)+'COMBAT_LOG_VERSION,22,ADVANCED_LOG_ENABLED,1,BUILD_VERSION,1.60.1,PROJECT_ID,18\n');
+  let r=f.log.summary(f.snapshot);assert.equal(r.outgoing.damage,65);assert.equal(r.targets[0].name,'Sunscale');assert.equal(r.targets[0].abilities[0].damage,65);
+  fs.appendFileSync(second,line('SPELL_DAMAGE',{amount:10,dest:'Kodo-1',destName:'Kodo'})+'\n');
+  r=f.log.summary(f.snapshot);assert.equal(r.outgoing.damage,75);assert.equal(r.targets.length,2);assert.equal(r.targets.find(t=>t.name==='Kodo').damage,10);assert.equal(r.targets.find(t=>t.name==='Sunscale').damage,65);
+ }finally{f.close();}
+});

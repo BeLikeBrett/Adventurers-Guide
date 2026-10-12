@@ -72,6 +72,17 @@ function WoWAI.SetAutoCombatLogging(value)
     WoWAI.SyncCombatLogging()
     return WoWAI.CombatLoggingStatus()
 end
+function WoWAI.FlushCombatRecording()
+    -- A synchronous stop/start closes the disk buffer. Do not interrupt combat,
+    -- touch a logger that is off, or clear any recorded events.
+    if not enabled or call(UnitAffectingCombat,"player") or logState()~=true then return false end
+    local ok=pcall(LoggingCombat,false)
+    if not ok then return false end
+    local restarted=pcall(LoggingCombat,true)
+    local active=logState()
+    if not restarted or active~=true then loggingReason="Combat recording could not restart.";return false end
+    return true
+end
 function WoWAI.SetCombatEnabled(value)
     enabled=value~=false
     events,owners,swings,samples={}, {}, {}, {};first=1;measurement=nil;droppedUntil=nil;playerGUID=nil;restricted=false

@@ -32,7 +32,7 @@ local PRESENCE_MAX = 2000 -- presence/0001..2000.wav, one flipped by the bridge 
 local STRIP_TRIES = 3 -- re-show an unacknowledged message this many times before falling back
 local CELL, CELLS_PER_ROW, MAX_ROWS = 1, 512, 1
 local STRIP_SECONDS = 40 -- max per message; it leaves the strip as soon as the bridge acknowledges
-local POLL_SCHEDULE = { 5, 10, 16, 24, 34, 46, 60, 80, 100, 130, 160, 200, 240, 300 }
+local POLL_SCHEDULE = { 5, 10, 14, 18, 22, 26, 30, 36, 44, 56, 72, 100, 130, 160, 200, 240, 300 }
 local POLL_TAIL = 60
 local TICK_SECONDS = 2
 local CONNECT_WAIT = 15 -- seconds the Connect button waits for the bridge before giving up
@@ -220,6 +220,7 @@ local function InitDB()
     s.model = s.model or "gpt-6.1-sol"
     s.effort = s.effort or "low"
 	db.lastSeq = db.lastSeq or 0
+    db.snapshotSeq = math.max(tonumber(db.snapshotSeq) or 0, time()*1000.0)
 	-- Chats deleted in game that the bridge hasn't confirmed forgetting yet.
 	db.forget = db.forget or {}
 	-- Identifies this counter's lifetime. If the saved data is ever reset, a new
@@ -1305,6 +1306,8 @@ function WoWAI.Send(text, allow)
 	end
 	-- The game context rides along when the bridge doesn't have this version yet.
 	local ctx = ContextToSend(limit - #text)
+    if WoWAI.FlushCombatRecording and text:lower():match("%f[%a]dmg%f[%A]") then WoWAI.FlushCombatRecording()
+    elseif WoWAI.FlushCombatRecording and (text:lower():match("damage") or text:lower():match("combat") or text:lower():match("crit") or text:lower():match("breakdown")) then WoWAI.FlushCombatRecording() end
     local promptSnapshot = WoWAI.QueueSnapshot and WoWAI.QueueSnapshot(false,"player",nil,true)
 
 	db.lastSeq = db.lastSeq + 1
@@ -1314,7 +1317,7 @@ function WoWAI.Send(text, allow)
 	if c.agent and c.agent ~= "" then table.insert(tokens, "agent=" .. c.agent) end
 	table.insert(tokens, "model=" .. (c.model or db.settings.model))
     table.insert(tokens, "effort=" .. (c.effort or db.settings.effort))
-    if promptSnapshot then table.insert(tokens,"snapshot="..tostring(promptSnapshot)) end
+    if promptSnapshot then table.insert(tokens,"snapshot="..string.format("%.0f",promptSnapshot)) end
 	local allowHex
 	if type(allow) == "table" and #allow > 0 then
 		table.insert(tokens, "allow=" .. table.concat(allow, ","))
@@ -1425,7 +1428,7 @@ function WoWAI.QueueSnapshot(idle,section,requestToken,urgent)
         end
         local i = ((step - 1) % #chunks) + 1
         run.outbound[0] = { chat = "", cwd = "", flags = "h", name = "",
-            text = "__COPILOT1__" .. token .. ":" .. i .. ":" .. #chunks .. ":" .. chunks[i],
+            text = "__COPILOT1__" .. string.format("%.0f",token) .. ":" .. i .. ":" .. #chunks .. ":" .. chunks[i],
             sentAt = GetTime(), snapshot = true }
         RefreshStrip()
         C_Timer.After(0.25, advance)

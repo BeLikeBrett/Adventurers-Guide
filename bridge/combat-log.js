@@ -119,19 +119,14 @@ function add(t,e){
 }
 function ranked(rows,total){return [...rows.values()].sort((a,b)=>b.damage-a.damage||b.effectiveHealing-a.effectiveHealing||(a.name||'').localeCompare(b.name||'')).map(row=>({...row,damageShare:total?row.damage/total*100:0,critPercent:row.hits?row.crits/row.hits*100:0,averageHit:row.hits?row.damage/row.hits:null}));}
 function row(rows,key,meta,e){let r=rows.get(key);if(!r){r={...totals(),...meta};rows.set(key,r);}add(r,e);}
-class CombatLog {
+class LogSegment {
  constructor(addonDir,{now=Date.now,maxEvents=MAX_EVENTS,maxRead=MAX_READ}={}){
-  this.directory=path.resolve(addonDir,'../..','Logs');this.now=now;this.maxEvents=maxEvents;this.maxRead=maxRead;this.events=[];this.offset=0;this.pending='';this.decoder=new StringDecoder('utf8');this.lastDiscovery=0;this.error=null;this.droppedUntil=0;this.unsupported=[];this.started=now();
+  this.directory=path.resolve(addonDir,'../..','Logs');this.now=now;this.maxEvents=maxEvents;this.maxRead=maxRead;this.events=[];this.offset=0;this.pending='';this.decoder=new StringDecoder('utf8');this.lastDiscovery=0;this.error=null;this.droppedUntil=0;this.unsupported=[];this.started=now();this.firstAt=null;this.lastAt=null;
  }
  reset(){this.events=[];this.unsupported=[];this.offset=0;this.pending='';this.decoder=new StringDecoder('utf8');this.version=undefined;this.build=undefined;this.started=this.now();this.droppedUntil=0;this.lastAt=null;this.firstAt=null;}
  read(){
   const now=this.now();
   try{
-   if(!this.file||now-this.lastDiscovery>=2000){
-    this.lastDiscovery=now;
-    const files=fs.readdirSync(this.directory).filter(n=>/^WoWCombatLog.*\.txt$/i.test(n)).map(n=>{const file=path.join(this.directory,n);return {file,stat:fs.statSync(file)};}).filter(f=>f.stat.isFile()).sort((a,b)=>b.stat.mtimeMs-a.stat.mtimeMs);
-    if(files[0]&&files[0].file!==this.file){this.file=files[0].file;this.identity=null;this.reset();}
-   }
    if(!this.file)return this.status();
    const stat=fs.statSync(this.file),identity=stat.dev+':'+stat.ino;
    if(this.identity&&this.identity!==identity||stat.size<this.offset||stat.size===this.offset&&stat.mtimeMs!==this.mtime){this.reset();}
@@ -182,11 +177,17 @@ class CombatLog {
    capabilities:{abilityTotals:true,individualHits:true,crits:true,exactTimeWindow:true,weaponIdentity:false},
    limitations:'Recorded events only; the client may buffer file writes. Incoming totals cover your character; damage to controlled units is separate. Weapon IDs are not in damage events. Cast order shows correlation, not proven causes. Damage is the logged hit amount; effectiveDamage subtracts overkill. Absorb event amounts and damage-field absorbs overlap and must not be added together.'};
   if(!r.available){r.reason=status.reason||'The log has no recent supported combat events. Fight after enabling /combatlog.';return r;}
-  const abilities=new Map(),incoming=new Map(),attackers=new Map(),sources=new Map();
+  const abilities=new Map(),incoming=new Map(),attackers=new Map(),sources=new Map(),targets=new Map();
+  const deaths=new Map(relevant.filter(e=>e.type==='death').map(e=>[e.dest,new Date(e.at).toISOString()]));
   let matched=0,filtered=0,allCasts=0,crits=0,incomingCrits=0;
   for(const e of relevant){const outgoing=mine(e.source)&&e.event!=='DAMAGE_SPLIT',hurt=e.dest===player,controlled=e.dest!==player&&mine(e.dest);if(!outgoing&&!hurt&&!controlled)continue;matched++;
    const meta={spellID:e.spellID,name:e.name,school:e.school,periodic:e.periodic,hand:e.hand},key=[e.spellID,e.name,e.spellID===0?e.hand:''].join(':');
-   if(outgoing){add(r.outgoing,e);row(abilities,key,meta,e);row(sources,e.source,{guid:e.source,name:e.sourceName,kind:owners.get(e.source)},e);}
+   if(outgoing){add(r.outgoing,e);row(abilities,key,meta,e);row(sources,e.source,{guid:e.source,name:e.sourceName,kind:owners.get(e.source)},e);
+    if(e.dest&&['damage','miss'].includes(e.type)){
+     let target=targets.get(e.dest);if(!target){target={...totals(),guid:e.dest,name:e.destName,firstEventAt:new Date(e.at).toISOString(),abilities:new Map(),sources:new Map()};targets.set(e.dest,target);}
+     add(target,e);target.lastEventAt=new Date(e.at).toISOString();row(target.abilities,key,meta,e);row(target.sources,e.source,{guid:e.source,name:e.sourceName,kind:owners.get(e.source)},e);
+    }
+   }
    if(hurt){add(r.incoming,e);row(incoming,[e.source,key].join(':'),{...meta,attacker:e.sourceName||'Environment',attackerGUID:e.source},e);row(attackers,e.source,{guid:e.source,name:e.sourceName||'Environment'},e);}
    if(controlled)add(r.incomingControlledUnits,e);
    const detail={at:new Date(e.at).toISOString(),secondsIntoWindow:(e.at-from)/1000,event:e.event,type:e.type,source:e.sourceName,sourceGUID:e.source,target:e.destName,targetGUID:e.dest,sourceKind:owners.get(e.source),targetKind:owners.get(e.dest),spellID:e.spellID,name:e.name,hand:e.hand,school:e.school,damage:e.type==='damage'?e.amount:undefined,effectiveDamage:e.effective,rawAmount:e.rawAmount,critical:e.critical,blocked:e.blocked,resisted:e.resisted,absorbed:e.absorbed,overkill:e.overkill,glancing:e.glancing,crushing:e.crushing,missType:e.missType,healing:e.type==='healing'?e.amount:undefined,overheal:e.overheal,shieldSpellID:e.shieldSpellID,shieldName:e.shieldName,shieldAmount:e.type==='absorb'?e.amount:undefined,failureReason:e.failureReason};
@@ -194,12 +195,38 @@ class CombatLog {
    if(e.type==='damage'&&e.critical){if(outgoing){crits++;if(r.critEvents.length<eventLimit)r.critEvents.push(detail);}if(hurt){incomingCrits++;if(r.incomingCritEvents.length<eventLimit)r.incomingCritEvents.push(detail);}}
    if(outgoing&&e.type==='cast'){allCasts++;if(r.castSequence.length<eventLimit)r.castSequence.push(detail);}
   }
+  r.targets=[...targets.values()].sort((a,b)=>b.lastEventAt.localeCompare(a.lastEventAt)).slice(0,limit).map(t=>({...t,deathAt:deaths.get(t.guid),abilities:ranked(t.abilities,t.damage),sources:ranked(t.sources,t.damage)}));
   r.abilities=ranked(abilities,r.outgoing.damage);r.incomingAbilities=ranked(incoming,r.incoming.damage);r.attackers=ranked(attackers,r.incoming.damage);r.sources=ranked(sources,r.outgoing.damage);
   r.rowsTruncated=false;for(const k of ['abilities','incomingAbilities','attackers','sources']){if(r[k].length>limit){r.rowsTruncated=true;r[k]=r[k].slice(0,limit);}}
   r.filteredEventCount=filtered;r.eventOffset=eventOffset;r.nextEventOffset=filtered>eventOffset+r.events.length?eventOffset+r.events.length:null;r.eventsTruncated=filtered>r.events.length;r.matchedEvents=matched;r.critEventsTruncated=crits>r.critEvents.length;r.incomingCritEventsTruncated=incomingCrits>r.incomingCritEvents.length;r.castSequenceTruncated=allCasts>r.castSequence.length;
   r.outgoing.dps=r.outgoing.damage/Math.max(1,r.windowSeconds);r.incoming.damagePerSecond=r.incoming.damage/Math.max(1,r.windowSeconds);
   if(!matched){r.available=false;r.reason='No recorded events for this character in that window. Recording may be disabled, buffered, or the fight may be older. Do not treat missing data as zero.';}
   return r;
+ }
+}
+// Logging restarts produce new files. Drain every recently modified segment so
+// a flushed fight is retained even when a newer file contains only its header.
+class CombatLog extends LogSegment {
+ constructor(addonDir,options={}){super(addonDir,options);this.addonDir=addonDir;this.options=options;this.segments=new Map();}
+ read(){
+  const now=this.now();
+  try{
+   const files=fs.readdirSync(this.directory).filter(n=>/^WoWCombatLog.*\.txt$/i.test(n)).map(n=>{const file=path.join(this.directory,n);return {file,stat:fs.statSync(file)};}).filter(f=>f.stat.isFile()).sort((a,b)=>b.stat.mtimeMs-a.stat.mtimeMs);
+   const selected=files.filter((f,i)=>i===0||f.stat.mtimeMs>=now-KEEP_MS).slice(0,24);
+   const selectedPaths=new Set(selected.map(f=>f.file));
+   for(const key of this.segments.keys())if(!selectedPaths.has(key))this.segments.delete(key);
+   for(const {file} of selected){let reader=this.segments.get(file);if(!reader){reader=new LogSegment(this.addonDir,this.options);reader.file=file;this.segments.set(file,reader);}reader.read();}
+   const readers=[...this.segments.values()],valid=readers.filter(r=>!r.error);
+   this.file=selected[0]?.file;this.error=selected.length?(valid.length?null:readers[0]?.error):'Type /combatlog in WoW to enable detailed recording.';
+   this.events=valid.flatMap(r=>r.events).filter(e=>e.at>=now-KEEP_MS).sort((a,b)=>a.at-b.at);
+   this.unsupported=valid.flatMap(r=>r.unsupported).filter(at=>at>=now-KEEP_MS);
+   this.firstAt=this.events[0]?.at??null;this.lastAt=valid.reduce((at,r)=>Math.max(at,r.lastAt||0),0)||null;
+   this.started=valid.reduce((at,r)=>Math.min(at,r.started),this.started);this.droppedUntil=valid.reduce((at,r)=>Math.max(at,r.droppedUntil),this.droppedUntil);
+   if(this.events.length>this.maxEvents){this.droppedUntil=Math.max(this.droppedUntil,this.events[this.events.length-this.maxEvents-1].at);this.events=this.events.slice(-this.maxEvents);}
+   this.size=valid.reduce((n,r)=>n+(r.size||0),0);this.offset=valid.reduce((n,r)=>n+r.offset,0);
+   const latest=this.segments.get(this.file);this.version=latest?.version;this.build=latest?.build;
+  }catch(e){this.error=e.code==='ENOENT'?'No combat-log file found. Recording may not have started yet.':'Combat-log files are not readable ('+(e.code||'read failure')+').';}
+  return this.status();
  }
 }
 module.exports={CombatLog,parseLine,csv,timestamp};

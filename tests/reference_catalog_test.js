@@ -91,3 +91,12 @@ test('question context keeps relevant data and exposes omitted sections without 
  const partial=promptSnapshot({receivedAt:1000,snapshot:{player:{level:14}}},1500,'Where do I go?');
  assert.equal(partial.quests,undefined);assert.equal(partial.inventory,undefined);
 });
+
+test('combat prefetch respects requested windows and never starts a future measurement',()=>{
+ const {combatRequest,compactCombat}=require('../bridge/prompt-context');
+ assert.equal(combatRequest('What should I buy?'),null);assert.equal(combatRequest('Measure my damage for the next 10 seconds'),null);
+ assert.equal(combatRequest('My damage in the last 2 minutes').seconds,120);assert.equal(combatRequest('give me dmg breakdown of the Sunscale I just killed').seconds,60);
+ assert.equal(combatRequest('damage over the last 10 minutes'),null);assert.equal(compactCombat({available:false}),null);
+ const data={available:true,source:'Client combat-log file',from:'start',to:'end',windowSeconds:60,coverageComplete:false,outgoing:{damage:40},incoming:{damage:20},abilities:[{name:'Shot',damage:40,hits:2,crits:1}],incomingAbilities:[],sources:[],attackers:[],critEvents:[],incomingCritEvents:[],castSequence:[],events:[],targets:[],rowsTruncated:false};
+ const compact=compactCombat(data);assert.equal(compact.abilities[0].crits,1);assert.equal(compact.outgoing.damage,40);assert.equal(compact.coverageComplete,false);
+});

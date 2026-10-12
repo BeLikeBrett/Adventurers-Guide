@@ -1,6 +1,6 @@
 {
   "name": "adventurers-guide",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "private": true,
   "description": "A character-aware quest, gear and dungeon companion for World of Warcraft: Forever.",
   "license": "MIT",

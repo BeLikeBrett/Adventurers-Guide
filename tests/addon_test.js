@@ -1670,3 +1670,19 @@ test('failed or unreadable logging APIs remain unknown and never claim recording
  vm.run('LoggingCombat=function() return false end;WoWAI.SyncCombatLogging()');
  assert.equal(vm.evaluate('WoWAI.CombatLoggingStatus().recording'),'false');assert.match(vm.evaluate('WoWAI.CombatLoggingStatus().reason'),/did not start/);
 });
+
+test('combat questions flush the client disk buffer without losing the recording preference',()=>{
+ const vm=newVM();vm.run('recording=true;logWrites={};LoggingCombat=function(v) if v~=nil then recording=v;logWrites[#logWrites+1]=v end;return recording end;UnitAffectingCombat=function() return false end');
+ vm.run(fs.readFileSync(path.join(ADDON,'Combat.lua'),'utf8'),'WoWAI');login(vm);
+ vm.run('WoWAI.SetCombatEnabled(true);flushed=WoWAI.FlushCombatRecording()');
+ assert.equal(vm.evaluate('flushed'),'true');assert.equal(vm.evaluate('recording'),'true');assert.equal(vm.evaluate('logWrites[1]'),'false');assert.equal(vm.evaluate('logWrites[2]'),'true');
+ assert.equal(vm.evaluate('WoWAI.CombatLoggingStatus().startedByGuide'),'false','manual ownership preserved');
+ vm.run('UnitAffectingCombat=function() return true end;WoWAI.FlushCombatRecording()');assert.equal(vm.num('#logWrites'),2,'does not interrupt active combat');
+});
+
+test('snapshot IDs stay ahead of old packets after a settings reset and remain plain decimal on the wire',()=>{
+ const vm=newVM();login(vm);vm.run(fs.readFileSync(path.join(ADDON,'Snapshot.lua'),'utf8'),'WoWAI');vm.run('WoWAI.QueueSnapshot(false,"player")');
+ const packet=stripRecords(vm).find(r=>r.text.startsWith('__COPILOT1__'));
+ assert.match(packet.text,/^__COPILOT1__\d+:/);assert.ok(vm.num('WoWAIDB.snapshotSeq')>1000000000000);
+ const reset=newVM();reset.run('STUB.epoch=STUB.epoch+2');login(reset);reset.run(fs.readFileSync(path.join(ADDON,'Snapshot.lua'),'utf8'),'WoWAI');reset.run('WoWAI.QueueSnapshot(false,"player")');assert.ok(reset.num('WoWAIDB.snapshotSeq')>vm.num('WoWAIDB.snapshotSeq'));
+});

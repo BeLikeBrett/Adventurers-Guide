@@ -624,10 +624,12 @@ function runJob(job) {
 
   const lightweight = /^\s*(hi|hey|hello|thanks|thank you|ty|yo|sup)[.!?\s]*$/i.test(job.text);
   const usableSnapshot=state.snapshot&&state.snapshot.session===job.session&&Date.now()-state.snapshot.receivedAt<=90000?state.snapshot:null;
+  const combatQuery=cfg.copilot&&usableSnapshot&&Context.combatRequest(job.text);
+  const combatContext=combatQuery?Context.compactCombat(combatLog.summary(usableSnapshot.snapshot,combatQuery)):null;
   const snapshot = usableSnapshot && !lightweight ? `\nStructured snapshot (received ${new Date(usableSnapshot.receivedAt).toISOString()}, may be stale):\n${JSON.stringify(Context.promptSnapshot(usableSnapshot,Date.now(),job.text))}` : '';
   const recent = cfg.copilot && character ? (transcripts.chats[job.chat]?.messages || []).filter(m => m.id !== job.id && m.characterKey === character.key && ['user', 'assistant'].includes(m.role)).slice(-4).map(m => `${m.role}: ${m.text.slice(0, 450)}`).join('\n') : '';
   const legacyContext=!cfg.copilot||(!usableSnapshot&&state.context?.session===job.session&&Date.now()-state.context.at<=90000)?gameContext():'';
-  const ctx = legacyContext + (cfg.copilot ? '\nGame identity: World of Warcraft: Forever. Never silently substitute Classic or Retail mechanics.\n' + snapshot + notebook.prompt(character) + (recent ? '\nRecent conversation excerpts (may be incomplete):\n' + recent : '') : '');
+  const ctx = legacyContext + (cfg.copilot ? '\nGame identity: World of Warcraft: Forever. Never silently substitute Classic or Retail mechanics.\n' + snapshot + (combatContext?'\nPrefetched combat report (fresh local recording; use directly, request tools only for missing detail or another window):\n'+JSON.stringify(combatContext):'') + notebook.prompt(character) + (recent ? '\nRecent conversation excerpts (may be incomplete):\n' + recent : '') : '');
   const images = [];
   if (cfg.copilot?.vision && !lightweight && Context.needsVision(job.text)) {
     try { images.push(Vision.screenshot(cfg)); } catch (e) { log('vision unavailable:', e.message); }
